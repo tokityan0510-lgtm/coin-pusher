@@ -191,3 +191,19 @@ export const PAYOUT_MAX_ACTIVE = 400;
 
 // ---- 音 ----
 export const MUTE_STORAGE_KEY = 'coinPusher.mute.v1';
+
+// ---- JPボール ----
+// スロットで ★ がそろうとボールが盤面に出てくる。手前から落とせたらジャックポットチャンス、溝に落ちたら何もなし。
+/** ボールの半径（メダルより大きく、メダルの山に乗って押される） */
+export const BALL_RADIUS = 0.7;
+/** ボールの質量（メダル1枚 = medalMass）。重いほどメダルを押しのけて進む */
+export const BALL_MASS = 4;
+export const BALL_FRICTION = 0.4;
+/**
+ * 回転減衰。Rapier には転がり抵抗が無いので、これが無いと傾いた盤面をすぐ転がり落ちてしまう。
+ * 強めにして「メダルに押されてじわじわ進む」ようにする。
+ */
+export const BALL_ANGULAR_DAMPING = 4;
+export const BALL_LINEAR_DAMPING = 0.6;
+/** 盤面に同時に出せるボールの数。超えるときはその場でジャックポットチャンスにする */
+export const MAX_BALLS = 3;

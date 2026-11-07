@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import {
   BACK_Z,
+  BALL_RADIUS,
+  MAX_BALLS,
   CURTAIN_FRONT_Z,
   DROP_X_MAX,
   DROP_Y,
@@ -27,6 +29,7 @@ import {
 import type { Lcd } from './lcd';
 import { boardParts, CURTAIN_TOP, POSE_STRIDE, type Machine } from './physics';
 import {
+  ballTexture,
   brushedMetalTexture,
   chanceSignTexture,
   floorTexture,
@@ -58,6 +61,7 @@ export class GameScene {
   readonly cabinet = new THREE.Group();
 
   private readonly medalMesh: THREE.InstancedMesh;
+  private readonly ballMeshes: THREE.Mesh[] = [];
   private readonly pusherMesh: THREE.Mesh;
   private readonly keyLight: THREE.DirectionalLight;
   private readonly frontStrip: THREE.MeshBasicMaterial;
@@ -184,6 +188,22 @@ export class GameScene {
     this.medalMesh.frustumCulled = false;
     this.cabinet.add(this.medalMesh);
 
+    // JPボール（最大 MAX_BALLS 個。使わないものは隠す）
+    const ballGeo = new THREE.SphereGeometry(BALL_RADIUS, 32, 20);
+    const ballMat = new THREE.MeshStandardMaterial({
+      map: ballTexture(),
+      metalness: 0.25,
+      roughness: 0.18,
+      emissive: 0x300008,
+    });
+    for (let i = 0; i < MAX_BALLS; i++) {
+      const m = new THREE.Mesh(ballGeo, ballMat);
+      m.castShadow = true;
+      m.visible = false;
+      this.ballMeshes.push(m);
+      this.cabinet.add(m);
+    }
+
     // 電飾（電球の玉＋加算合成の光のにじみ）
     const positions = this.bulbPositions();
     this.bulbs = new THREE.InstancedMesh(
@@ -309,6 +329,24 @@ export class GameScene {
     }
     this.medalMesh.count = n;
     this.medalMesh.instanceMatrix.needsUpdate = true;
+
+    // JPボール
+    const bp = machine.ballPrev;
+    const bc = machine.ballCurr;
+    for (let i = 0; i < this.ballMeshes.length; i++) {
+      const mesh = this.ballMeshes[i];
+      mesh.visible = i < machine.ballCount;
+      if (!mesh.visible) continue;
+      const o = i * POSE_STRIDE;
+      mesh.position.set(
+        bp[o] + (bc[o] - bp[o]) * alpha,
+        bp[o + 1] + (bc[o + 1] - bp[o + 1]) * alpha,
+        bp[o + 2] + (bc[o + 2] - bp[o + 2]) * alpha,
+      );
+      q.set(bp[o + 3], bp[o + 4], bp[o + 5], bp[o + 6]);
+      qb.set(bc[o + 3], bc[o + 4], bc[o + 5], bc[o + 6]);
+      mesh.quaternion.copy(q.slerp(qb, alpha));
+    }
 
     this.updateLights(dt);
     this.renderer.render(this.scene, this.camera);

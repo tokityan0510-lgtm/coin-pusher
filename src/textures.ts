@@ -197,4 +197,37 @@ export function glowTexture(): THREE.Texture {
   return new THREE.CanvasTexture(c);
 }
 
+/** JPボール：赤と金の帯に「JP」の文字（球に巻きつける正距円筒図法のテクスチャ） */
+export function ballTexture(): THREE.Texture {
+  const [c, g] = canvas(512, 256);
+  g.fillStyle = '#d4102f';
+  g.fillRect(0, 0, 512, 256);
+  // 赤道の金帯
+  const band = g.createLinearGradient(0, 100, 0, 156);
+  band.addColorStop(0, '#a87410');
+  band.addColorStop(0.5, '#ffe28a');
+  band.addColorStop(1, '#a87410');
+  g.fillStyle = band;
+  g.fillRect(0, 104, 512, 48);
+  // 帯の上に JP と星（裏表に2つずつ）
+  g.font = 'italic 900 40px system-ui, sans-serif';
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  for (let i = 0; i < 4; i++) {
+    const x = 64 + i * 128;
+    if (i % 2 === 0) {
+      g.fillStyle = '#7a0010';
+      g.fillText('JP', x, 129);
+    } else {
+      starPath(g, x, 128, 20);
+      g.fillStyle = '#7a0010';
+      g.fill();
+    }
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
+  return t;
+}
+
 export { starPath };

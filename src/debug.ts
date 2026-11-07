@@ -24,6 +24,8 @@ export interface DebugHooks {
   /** スロットの確認用 */
   onSlotStock: () => void;
   onSlotForce: (symbol: '7' | 'STAR') => void;
+  /** JPボールを出す */
+  onSpawnBall: () => void;
   /** 影の有無 */
   onShadows: (on: boolean) => void;
 }
@@ -73,10 +75,12 @@ export function createDebugPanel(hooks: DebugHooks): GUI {
     stock: () => hooks.onSlotStock(),
     seven: () => hooks.onSlotForce('7'),
     chance: () => hooks.onSlotForce('STAR'),
+    ball: () => hooks.onSpawnBall(),
   };
   slot.add(slotActions, 'stock').name('保留 +1');
   slot.add(slotActions, 'seven').name('次を 7 揃いにする');
-  slot.add(slotActions, 'chance').name('次を JPチャンスにする');
+  slot.add(slotActions, 'chance').name('次を ★（ボール）にする');
+  slot.add(slotActions, 'ball').name('JPボールを出す');
   slot.close();
 
   const view = gui.addFolder('表示');

@@ -2,6 +2,9 @@ import RAPIER from '@dimforge/rapier3d-compat';
 import './style.css';
 import {
   DEFAULT_PARAMS,
+  BALL_RADIUS,
+  CHUCKER_BAR_HEIGHT,
+  CHUCKER_Y,
   DROP_COOLDOWN,
   DROP_SCATTER,
   DROP_X_MAX,
@@ -72,6 +75,18 @@ async function main(): Promise<void> {
         showBanner(symbol === '7' ? `777  +${n}` : `WIN  +${n}`, symbol === '7' ? 'big' : 'win');
       },
       miss: () => sound.miss(),
+      ballGet: () => {
+        // ★がそろったら JPボールを盤面に出す。入賞口の枠より下、左右どちらかから
+        const side = Math.random() < 0.5 ? -1 : 1;
+        const x = side * (1.3 + Math.random() * (FLOOR_X - 2.2));
+        const ok = machine.spawnBall(x, CHUCKER_Y - CHUCKER_BAR_HEIGHT / 2 - BALL_RADIUS - 0.05, DROP_Z);
+        if (ok) {
+          sound.ballGet();
+          lcd.flash(1.2);
+          showBanner('BALL GET!\n手前に落とせば JPチャンス', 'ball');
+        }
+        return ok;
+      },
       jackpotChance: () => {
         sound.jackpotChance();
         showBanner('JACKPOT CHANCE!!', 'chance');
@@ -120,7 +135,7 @@ async function main(): Promise<void> {
   updateMute();
 
   let bannerTimer = 0;
-  function showBanner(text: string, kind: 'win' | 'big' | 'chance' | 'jackpot'): void {
+  function showBanner(text: string, kind: 'win' | 'big' | 'chance' | 'jackpot' | 'ball' | 'lost'): void {
     banner.textContent = text;
     banner.className = '';
     void banner.offsetWidth;
@@ -192,6 +207,7 @@ async function main(): Promise<void> {
       },
       onResetBoard: () => {
         machine.clearMedals();
+        machine.clearBalls();
         machine.fillInitial(INITIAL_MEDALS);
       },
       onAddCredits: (n) => {
@@ -216,6 +232,9 @@ async function main(): Promise<void> {
         if (slot.stock === 0 && slot.mode === 'idle') slot.addChucker();
       },
       onShadows: (on) => scene.setShadows(on),
+      onSpawnBall: () => {
+        if (!slot.events.ballGet()) showBanner('ボールは最大数です', 'win');
+      },
     });
   }
 
@@ -239,6 +258,8 @@ async function main(): Promise<void> {
     let won = 0;
     let lost = 0;
     let chucker = 0;
+    let ballWon = 0;
+    let ballLost = 0;
     let impacts = 0;
     let impactMax = 0;
     let impactPan = 0;
@@ -247,6 +268,8 @@ async function main(): Promise<void> {
       won += r.won;
       lost += r.lost;
       chucker += r.chucker;
+      ballWon += r.ballWon;
+      ballLost += r.ballLost;
       if (r.impacts > 0) {
         impacts += r.impacts;
         if (r.impactMax > impactMax) {
@@ -283,6 +306,16 @@ async function main(): Promise<void> {
       slot.addChucker();
       sound.chucker();
       scene.flashChucker();
+    }
+    for (let i = 0; i < ballWon; i++) {
+      slot.addJackpotChance();
+      sound.ballDrop();
+      scene.flashFront();
+      showBanner('BALL IN!!\nJACKPOT CHANCE', 'chance');
+    }
+    if (ballLost > 0) {
+      sound.lost();
+      showBanner('BALL LOST…', 'lost');
     }
     if (impacts > 0) sound.clink(impactMax / 14, impactPan);
     if (won || lost || chucker) updateSession();

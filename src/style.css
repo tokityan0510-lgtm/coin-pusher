@@ -227,6 +227,23 @@ body {
   text-shadow: 0 0 14px #ff0050, 0 3px 0 #400018;
 }
 
+#banner.ball {
+  font-size: 20px;
+  line-height: 1.15;
+  color: #ffd84a;
+  text-shadow: 0 0 14px #ff8a00, 0 3px 0 #402000;
+}
+
+#banner.ball::first-line {
+  font-size: 44px;
+}
+
+#banner.lost {
+  font-size: 30px;
+  color: #b0b8d0;
+  text-shadow: 0 2px 0 #000;
+}
+
 #banner.jackpot {
   font-size: 58px;
   line-height: 1.1;

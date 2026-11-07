@@ -1,6 +1,12 @@
 import RAPIER from '@dimforge/rapier3d-compat';
 import {
   BACK_Z,
+  BALL_ANGULAR_DAMPING,
+  BALL_FRICTION,
+  BALL_LINEAR_DAMPING,
+  BALL_MASS,
+  BALL_RADIUS,
+  MAX_BALLS,
   BOUNDS,
   CURTAIN_FRONT_Z,
   CURTAIN_GAP,
@@ -51,6 +57,9 @@ export interface StepResult {
   lost: number;
   /** 入賞口を通り抜けた */
   chucker: number;
+  /** JPボールが手前から落ちた / 溝などに落ちた */
+  ballWon: number;
+  ballLost: number;
   /** このステップで起きた衝突の数と最大の強さ（効果音用。速度変化量 ユニット/秒） */
   impacts: number;
   impactMax: number;
@@ -148,9 +157,22 @@ export class Machine {
   /** 直近 world.step() にかかった時間（ms） */
   lastStepMs = 0;
 
+  /** JPボール（index = 描画用メッシュの番号）と、その前ステップ・現ステップの姿勢 */
+  readonly balls: RAPIER.RigidBody[] = [];
+  readonly ballPrev = new Float32Array(MAX_BALLS * POSE_STRIDE);
+  readonly ballCurr = new Float32Array(MAX_BALLS * POSE_STRIDE);
   /** 各メダルの前ステップの速度（衝突検出用） */
   private readonly vel = new Float32Array(MAX_MEDALS * 3);
-  private readonly result: StepResult = { won: 0, lost: 0, chucker: 0, impacts: 0, impactMax: 0, impactPan: 0 };
+  private readonly result: StepResult = {
+    won: 0,
+    lost: 0,
+    chucker: 0,
+    ballWon: 0,
+    ballLost: 0,
+    impacts: 0,
+    impactMax: 0,
+    impactPan: 0,
+  };
   private readonly boardColliders: RAPIER.Collider[] = [];
   private readonly pusherCollider: RAPIER.Collider;
   private pusherPhase = 0;
@@ -258,6 +280,7 @@ export class Machine {
 
     const result = this.result;
     result.won = result.lost = result.chucker = result.impacts = 0;
+    result.ballWon = result.ballLost = 0;
     result.impactMax = 0;
     let panSum = 0;
     const inv = 1 / FIXED_DT;
@@ -319,7 +342,82 @@ export class Machine {
       }
     }
     result.impactPan = result.impacts > 0 ? clamp(panSum / result.impacts / WALL_X, -1, 1) : 0;
+    this.stepBalls(result);
     return result;
+  }
+
+  // ---------------------------------------------------------------- JPボール
+
+  /** ボールを出す。上限なら false */
+  spawnBall(x: number, y: number, z: number): boolean {
+    if (this.balls.length >= MAX_BALLS) return false;
+    const body = this.world.createRigidBody(
+      RAPIER.RigidBodyDesc.dynamic()
+        .setTranslation(x, y, z)
+        .setCanSleep(true)
+        .setLinearDamping(BALL_LINEAR_DAMPING)
+        .setAngularDamping(BALL_ANGULAR_DAMPING)
+        .setSoftCcdPrediction(DROP_SOFT_CCD),
+    );
+    this.world.createCollider(
+      RAPIER.ColliderDesc.ball(BALL_RADIUS).setFriction(BALL_FRICTION).setRestitution(0.1).setMass(BALL_MASS),
+      body,
+    );
+    const i = this.balls.length;
+    this.balls.push(body);
+    this.readBallPose(i, this.ballCurr);
+    this.ballPrev.set(this.ballCurr.subarray(i * POSE_STRIDE, (i + 1) * POSE_STRIDE), i * POSE_STRIDE);
+    return true;
+  }
+
+  get ballCount(): number {
+    return this.balls.length;
+  }
+
+  clearBalls(): void {
+    for (const b of this.balls) this.world.removeRigidBody(b);
+    this.balls.length = 0;
+  }
+
+  private stepBalls(result: StepResult): void {
+    const n = this.balls.length;
+    this.ballPrev.set(this.ballCurr.subarray(0, n * POSE_STRIDE));
+    for (let i = n - 1; i >= 0; i--) {
+      if (!this.balls[i].isSleeping()) this.readBallPose(i, this.ballCurr);
+      const o = i * POSE_STRIDE;
+      const x = this.ballCurr[o];
+      const y = this.ballCurr[o + 1];
+      const z = this.ballCurr[o + 2];
+      const bad = !Number.isFinite(x + y + z) || Math.abs(x) > BOUNDS.x || z < BOUNDS.zMin || z > BOUNDS.zMax;
+      if (y < KILL_Y || bad) {
+        // メダルと同じ判定：手前端の先なら成功、溝・異常値は失敗
+        if (!bad && z > FRONT_Z - 0.1 && Math.abs(x) < FLOOR_X + BALL_RADIUS) result.ballWon++;
+        else result.ballLost++;
+        this.world.removeRigidBody(this.balls[i]);
+        const last = this.balls.length - 1;
+        if (i !== last) {
+          this.balls[i] = this.balls[last];
+          const src = last * POSE_STRIDE;
+          this.ballCurr.copyWithin(o, src, src + POSE_STRIDE);
+          this.ballPrev.copyWithin(o, src, src + POSE_STRIDE);
+        }
+        this.balls.pop();
+      }
+    }
+  }
+
+  private readBallPose(i: number, out: Float32Array): void {
+    const body = this.balls[i];
+    const t = body.translation();
+    const r = body.rotation();
+    const o = i * POSE_STRIDE;
+    out[o] = t.x;
+    out[o + 1] = t.y;
+    out[o + 2] = t.z;
+    out[o + 3] = r.x;
+    out[o + 4] = r.y;
+    out[o + 5] = r.z;
+    out[o + 6] = r.w;
   }
 
   /** 盤上のメダルを全て消す */
