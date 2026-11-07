@@ -20,9 +20,12 @@ import {
   PUSHER_SIDE_GAP,
   PUSHER_STROKE_MAX,
   PUSHER_STROKE_MIN,
-  POCKET_ENTER_Z,
-  POCKET_HEIGHT,
-  POCKET_WIDTH,
+  CHUCKER_BAR,
+  CHUCKER_BAR_HEIGHT,
+  CHUCKER_DEPTH,
+  CHUCKER_WIDTH,
+  CHUCKER_Y,
+  CHUCKER_Z,
   GUTTER_WIDTH,
   WALL_HEIGHT,
   WALL_THICKNESS,
@@ -46,8 +49,8 @@ export interface StepResult {
   won: number;
   /** 溝・盤外へ落ちた（没収） */
   lost: number;
-  /** 入賞口に入った */
-  pocket: number;
+  /** 入賞口を通り抜けた */
+  chucker: number;
   /** このステップで起きた衝突の数と最大の強さ（効果音用。速度変化量 ユニット/秒） */
   impacts: number;
   impactMax: number;
@@ -57,7 +60,7 @@ export interface StepResult {
 
 /** 静的な盤面パーツ（描画側でも同じ寸法を使う） */
 export interface BoxPart {
-  name: 'floor' | 'side' | 'wall' | 'curtain' | 'back' | 'pocket' | 'lid';
+  name: 'floor' | 'side' | 'wall' | 'curtain' | 'back' | 'chucker' | 'lid';
   half: [number, number, number];
   pos: [number, number, number];
 }
@@ -69,7 +72,6 @@ export function boardParts(): BoxPart[] {
   const sideLen = GUTTER_START_Z - BACK_Z;
   const curtainBottom = PUSHER_HEIGHT + CURTAIN_GAP;
   const curtainTop = CURTAIN_TOP;
-  const pocketTop = PUSHER_HEIGHT + POCKET_HEIGHT;
   const sides = [-1, 1] as const;
   return [
     // 床（プッシャーと同じ幅。左右は溝）
@@ -94,28 +96,27 @@ export function boardParts(): BoxPart[] {
         pos: [s * (WALL_X + WALL_THICKNESS / 2), WALL_HEIGHT / 2 - floorT, BACK_Z + floorLen / 2],
       }),
     ),
-    // 仕切り板：プッシャーの上に浮いていて、引いたときに上のメダルを掻き落とす。
-    // 中央下部に入賞口が開いているので、左・右・口の上の3枚に分けて作る。
-    ...sides.map((s): BoxPart => {
-      const inner = POCKET_WIDTH / 2;
-      const halfX = (FLOOR_X - inner) / 2;
-      return {
-        name: 'curtain',
-        half: [halfX, (curtainTop - curtainBottom) / 2, CURTAIN_T / 2],
-        pos: [s * (inner + halfX), (curtainTop + curtainBottom) / 2, CURTAIN_FRONT_Z - CURTAIN_T / 2],
-      };
-    }),
+    // 仕切り板：プッシャーの上に浮いていて、引いたときに上のメダルを掻き落とす
     {
       name: 'curtain',
-      half: [POCKET_WIDTH / 2, (curtainTop - pocketTop) / 2, CURTAIN_T / 2],
-      pos: [0, (curtainTop + pocketTop) / 2, CURTAIN_FRONT_Z - CURTAIN_T / 2],
+      half: [FLOOR_X, (curtainTop - curtainBottom) / 2, CURTAIN_T / 2],
+      pos: [0, (curtainTop + curtainBottom) / 2, CURTAIN_FRONT_Z - CURTAIN_T / 2],
     },
-    // 入賞口の奥の止め板（入賞判定の前に奥へ抜けないように）
-    {
-      name: 'pocket',
-      half: [POCKET_WIDTH / 2 + 0.2, (pocketTop - PUSHER_HEIGHT) / 2 + 0.1, 0.1],
-      pos: [0, (pocketTop + PUSHER_HEIGHT) / 2 + 0.1, CURTAIN_FRONT_Z - 1.4],
-    },
+    // 入賞口の枠（左右と前後の4本）。投入メダルの落下途中に浮いている
+    ...sides.map(
+      (s): BoxPart => ({
+        name: 'chucker',
+        half: [CHUCKER_BAR / 2, CHUCKER_BAR_HEIGHT / 2, CHUCKER_DEPTH / 2 + CHUCKER_BAR],
+        pos: [s * (CHUCKER_WIDTH / 2 + CHUCKER_BAR / 2), CHUCKER_Y, CHUCKER_Z],
+      }),
+    ),
+    ...sides.map(
+      (s): BoxPart => ({
+        name: 'chucker',
+        half: [CHUCKER_WIDTH / 2, CHUCKER_BAR_HEIGHT / 2, CHUCKER_BAR / 2],
+        pos: [0, CHUCKER_Y, CHUCKER_Z + s * (CHUCKER_DEPTH / 2 + CHUCKER_BAR / 2)],
+      }),
+    ),
     // 仕切り板より奥のふた（見えない。メダルが仕切りを越えて奥へ入らないように）。上に液晶パネルが載る
     {
       name: 'lid',
@@ -149,7 +150,7 @@ export class Machine {
 
   /** 各メダルの前ステップの速度（衝突検出用） */
   private readonly vel = new Float32Array(MAX_MEDALS * 3);
-  private readonly result: StepResult = { won: 0, lost: 0, pocket: 0, impacts: 0, impactMax: 0, impactPan: 0 };
+  private readonly result: StepResult = { won: 0, lost: 0, chucker: 0, impacts: 0, impactMax: 0, impactPan: 0 };
   private readonly boardColliders: RAPIER.Collider[] = [];
   private readonly pusherCollider: RAPIER.Collider;
   private pusherPhase = 0;
@@ -239,7 +240,7 @@ export class Machine {
     return true;
   }
 
-  /** 1ステップ進める。盤外へ出たメダル・入賞したメダルは判定して必ず削除する。 */
+  /** 1ステップ進める。盤外へ出たメダルは判定して必ず削除する。入賞口の通過もここで判定する。 */
   step(): StepResult {
     const p = this.params;
     if (this.pusherRunning) this.pusherPhase = (this.pusherPhase + p.pusherSpeed * FIXED_DT) % 1;
@@ -256,7 +257,7 @@ export class Machine {
     this.prevPose.set(this.currPose.subarray(0, n * POSE_STRIDE));
 
     const result = this.result;
-    result.won = result.lost = result.pocket = result.impacts = 0;
+    result.won = result.lost = result.chucker = result.impacts = 0;
     result.impactMax = 0;
     let panSum = 0;
     const inv = 1 / FIXED_DT;
@@ -303,11 +304,18 @@ export class Machine {
         if (won) result.won++;
         else result.lost++;
         this.removeAt(i);
-      } else if (z < POCKET_ENTER_Z && y > PUSHER_HEIGHT - 0.2) {
-        // 仕切り板より奥に入れるのは入賞口だけ。口の幅の中なら入賞、それ以外（万一の回り込み）は没収
-        if (Math.abs(x) < POCKET_WIDTH / 2 + 0.1) result.pocket++;
-        else result.lost++;
+      } else if (z < CURTAIN_FRONT_Z - 0.15 && y > PUSHER_HEIGHT - 0.2) {
+        // 仕切り板より奥には本来行けない。万一回り込んだメダルは没収扱いで削除
+        result.lost++;
         this.removeAt(i);
+      } else if (
+        y < CHUCKER_Y &&
+        this.prevPose[o + 1] >= CHUCKER_Y &&
+        Math.abs(x) < CHUCKER_WIDTH / 2 &&
+        Math.abs(z - CHUCKER_Z) < CHUCKER_DEPTH / 2
+      ) {
+        // 入賞口の穴を上から下へ通り抜けた。メダルは消さずにそのまま落とす
+        result.chucker++;
       }
     }
     result.impactPan = result.impacts > 0 ? clamp(panSum / result.impacts / WALL_X, -1, 1) : 0;

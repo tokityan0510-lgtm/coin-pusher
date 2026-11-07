@@ -119,8 +119,8 @@ export class Sound {
 
   // ---------------------------------------------------------------- 入賞・スロット
 
-  /** 入賞口に入った */
-  pocket(): void {
+  /** 入賞口を通った */
+  chucker(): void {
     const ctx = this.ready();
     if (!ctx) return;
     const t = ctx.currentTime;

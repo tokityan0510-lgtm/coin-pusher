@@ -108,19 +108,31 @@ export const CURTAIN_FRONT_Z = -8.0;
 export const CURTAIN_GAP = 0.12;
 
 // ---- 入賞口（チャッカー） ----
-// 仕切り板の中央下部に開いた口。プッシャーが引くとき、上に乗ったメダルが仕切り板で止められずに
-// この口へ押し込まれる（＝入賞）。狙う位置（中央）と投入タイミング（プッシャーが前に出ているとき）で入りやすさが変わる。
-/** 口の幅 */
-export const POCKET_WIDTH = 1.5;
-/** 口の上端の高さ（プッシャー上面からの高さ）。メダル2枚重ねまで入る */
-export const POCKET_HEIGHT = 0.5;
-/** メダル中心がこの z より奥に入ったら入賞として削除 */
-export const POCKET_ENTER_Z = -8.15;
+// 投入したメダルが落ちる途中、中央に固定された枠。枠の穴を通り抜けたら入賞（スロットの保留+1）。
+// 実機のチャッカーと同じく、通り抜けたメダルはそのままプッシャーの上に落ちる（盤面からは減らない）。
+// 穴はメダル直径よりわずかに広いだけなので、中央を狙わないと枠に当たってはじかれる。
+/** 穴の幅（x） */
+export const CHUCKER_WIDTH = 1.1;
+/** 穴の奥行き（z） */
+export const CHUCKER_DEPTH = 1.2;
+/** 枠の中心の高さ。メダル中心がこの高さを上から下へ、穴の中で通過したら入賞 */
+export const CHUCKER_Y = PUSHER_HEIGHT + 1.6;
+/** 枠の太さ・高さ */
+export const CHUCKER_BAR = 0.16;
+export const CHUCKER_BAR_HEIGHT = 0.2;
 
 // ---- 投入 ----
-export const DROP_Y = PUSHER_HEIGHT + 2.2;
+export const DROP_Y = CHUCKER_Y + 1.0;
 export const DROP_Z = -6.6;
+/** 入賞口は投入位置の真下（中央） */
+export const CHUCKER_Z = DROP_Z;
 export const DROP_X_MAX = FLOOR_X - MEDAL_RADIUS - 0.1;
+/**
+ * 投入位置の左右のばらつき（±ユニット）。実機のシューターのように毎回少しずれる。
+ * 入賞口は「メダル中心が穴の上にあれば入る」ので、ばらつきが無いと中央を狙えば必ず入ってしまう。
+ * 0.8 で中央狙い約 80%、適当に落とすと約 20% が入賞（シミュレーション）。
+ */
+export const DROP_SCATTER = 0.8;
 /** 連打の最短間隔（秒） */
 export const DROP_COOLDOWN = 0.08;
 
@@ -149,11 +161,11 @@ export const REEL_STRIP: SlotSymbol[] = [
  * payout は払い出し枚数。STAR がそろうとジャックポットチャンス（ルーレット）へ。
  */
 export const SLOT_TABLE: { symbol: SlotSymbol; prob: number; payout: number }[] = [
-  { symbol: '7', prob: 1 / 80, payout: 50 },
-  { symbol: 'BAR', prob: 1 / 40, payout: 20 },
-  { symbol: 'STAR', prob: 1 / 40, payout: 0 },
-  { symbol: 'BELL', prob: 1 / 15, payout: 8 },
-  { symbol: 'CHERRY', prob: 1 / 8, payout: 3 },
+  { symbol: '7', prob: 1 / 150, payout: 20 },
+  { symbol: 'BAR', prob: 1 / 80, payout: 8 },
+  { symbol: 'STAR', prob: 1 / 80, payout: 0 },
+  { symbol: 'BELL', prob: 1 / 25, payout: 3 },
+  { symbol: 'CHERRY', prob: 1 / 15, payout: 2 },
 ];
 /** ハズレのうちリーチ（左2つがそろう）を見せる割合 */
 export const SLOT_FAKE_REACH_RATE = 0.2;
@@ -161,12 +173,12 @@ export const SLOT_FAKE_REACH_RATE = 0.2;
 // ---- ジャックポット ----
 /** ジャックポットの初期枚数（当たったらここに戻る） */
 export const JACKPOT_BASE = 100;
-/** 入賞1回ごとにジャックポットに積み増す枚数 */
-export const JACKPOT_ADD_PER_POCKET = 1;
+/** 入賞1回ごとにジャックポットに積み増す枚数（小数で貯めて、表示は切り捨て） */
+export const JACKPOT_ADD_PER_CHUCKER = 0.2;
 /** ジャックポットチャンスのルーレット。'JP' に止まるとジャックポット */
-export const JP_ROULETTE: (number | 'JP')[] = ['JP', 10, 20, 10, 30, 10, 20, 50];
+export const JP_ROULETTE: (number | 'JP')[] = ['JP', 5, 10, 5, 20, 5, 10, 30];
 /** ルーレットで 'JP' に止まる確率 */
-export const JP_WIN_PROB = 1 / 6;
+export const JP_WIN_PROB = 1 / 8;
 export const JACKPOT_STORAGE_KEY = 'coinPusher.jackpot.v1';
 
 // ---- 払い出し（当たりのメダルを盤面に降らせる） ----

@@ -71,7 +71,7 @@ export class Lcd {
     g.fillStyle = '#ffd84a';
     g.shadowColor = '#ff9a00';
     g.shadowBlur = 10;
-    g.fillText(String(slot.jackpot), W - 16, 22);
+    g.fillText(String(slot.jackpotDisplay), W - 16, 22);
     g.shadowBlur = 0;
 
     if (slot.mode === 'roulette' || slot.mode === 'rouletteResult' || slot.mode === 'chance') {

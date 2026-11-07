@@ -1,5 +1,5 @@
 import {
-  JACKPOT_ADD_PER_POCKET,
+  JACKPOT_ADD_PER_CHUCKER,
   JACKPOT_BASE,
   JP_ROULETTE,
   JP_WIN_PROB,
@@ -90,9 +90,14 @@ export class SlotMachine {
     this.jackpot = Math.max(JACKPOT_BASE, jackpot);
   }
 
+  /** 表示用のジャックポット枚数（内部は小数で貯める） */
+  get jackpotDisplay(): number {
+    return Math.floor(this.jackpot);
+  }
+
   /** 入賞1回。保留が満タンでもジャックポットは積み増す */
-  addPocket(): boolean {
-    this.jackpot += JACKPOT_ADD_PER_POCKET;
+  addChucker(): boolean {
+    this.jackpot += JACKPOT_ADD_PER_CHUCKER;
     this.events.jackpotChange(this.jackpot);
     this.dirty = true;
     if (this.stock >= SLOT_MAX_STOCK) return false;
@@ -296,7 +301,7 @@ export class SlotMachine {
       this.rouletteIndex = idx;
       const v = JP_ROULETTE[idx];
       const jackpot = v === 'JP';
-      const payout = jackpot ? this.jackpot : (v as number);
+      const payout = jackpot ? Math.floor(this.jackpot) : (v as number);
       this.lastRoulette = { jackpot, payout };
       if (jackpot) {
         this.jackpot = JACKPOT_BASE;
