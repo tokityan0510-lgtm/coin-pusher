@@ -21,6 +21,11 @@ export interface DebugHooks {
   onStress: (n: number) => void;
   /** プッシャーの停止・再開 */
   onPusherToggle: (running: boolean) => void;
+  /** スロットの確認用 */
+  onSlotStock: () => void;
+  onSlotForce: (symbol: '7' | 'STAR') => void;
+  /** 影の有無 */
+  onShadows: (on: boolean) => void;
 }
 
 /** ?debug=1 のときだけ表示する調整パネル */
@@ -62,6 +67,25 @@ export function createDebugPanel(hooks: DebugHooks): GUI {
     .add(pusherState, 'running')
     .name('動かす')
     .onChange((v: boolean) => hooks.onPusherToggle(v));
+
+  const slot = gui.addFolder('スロット確認');
+  const slotActions = {
+    stock: () => hooks.onSlotStock(),
+    seven: () => hooks.onSlotForce('7'),
+    chance: () => hooks.onSlotForce('STAR'),
+  };
+  slot.add(slotActions, 'stock').name('保留 +1');
+  slot.add(slotActions, 'seven').name('次を 7 揃いにする');
+  slot.add(slotActions, 'chance').name('次を JPチャンスにする');
+  slot.close();
+
+  const view = gui.addFolder('表示');
+  const viewState = { shadows: true };
+  view
+    .add(viewState, 'shadows')
+    .name('影')
+    .onChange((v: boolean) => hooks.onShadows(v));
+  view.close();
 
   const actions = {
     copyJson: () => copyJson(params, copyCtrl),
