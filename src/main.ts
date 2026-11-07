@@ -15,14 +15,17 @@ import {
   FLOOR_X,
   FRONT_Z,
   INITIAL_MEDALS,
-  JACKPOT_BASE,
+  FEVER_RAIN,
+  JACKPOT_TIERS,
   JACKPOT_STORAGE_KEY,
+  OLD_JACKPOT_STORAGE_KEY,
   MAX_CARDS,
   MAX_STEPS_PER_FRAME,
   PUSHER_FRONT_RETRACTED,
   REFILL_CREDITS,
   SHOWER_CARD_MEDALS,
   CARD_INFO,
+  type JackpotTier,
   type PhysicsParams,
 } from './config';
 import { Sound } from './audio';
@@ -76,10 +79,11 @@ async function main(): Promise<void> {
       reelStop: (i) => sound.reelStop(i, i === 2),
       reach: () => sound.reach(),
       win: (symbol, n) => {
-        sound.slotWin(symbol === '7');
+        sound.slotWin(symbol === '7' || symbol === 'BAR');
         lcd.flash(1.6);
         payout.add(n);
-        showBanner(symbol === '7' ? `777  +${n}` : `WIN  +${n}`, symbol === '7' ? 'big' : 'win');
+        if (symbol === '7') showBanner(slot.fever ? `777  +${n}\nFEVER 延長！` : `777  +${n}\nFEVER 突入！`, 'big');
+        else showBanner(`WIN  +${n}`, 'win');
       },
       miss: () => sound.miss(),
       ballGet: () => {
@@ -99,27 +103,40 @@ async function main(): Promise<void> {
         showBanner('JACKPOT CHANCE!!', 'chance');
       },
       rouletteTick: () => sound.rouletteTick(),
-      rouletteResult: (jackpot, n) => {
-        if (jackpot) {
-          sound.jackpot();
-          lcd.flash(4);
-          showBanner(`JACKPOT!!\n+${n}`, 'jackpot');
-        } else {
-          sound.smallPrize();
-          lcd.flash(1.5);
-          showBanner(`+${n}`, 'win');
-        }
-        payout.add(n, jackpot);
+      rouletteResult: (n) => {
+        sound.smallPrize();
+        lcd.flash(1.5);
+        showBanner(`+${n}`, 'win');
+        payout.add(n);
       },
-      jackpotChange: (v) => {
+      jackpotSelect: () => {
+        sound.jackpotChance();
+        lcd.flash(1);
+        showBanner('JACKPOT!!\nMINI・MAJOR・GRAND 抽選', 'chance');
+      },
+      jackpotSelectTick: () => sound.rouletteTick(),
+      jackpotWin: (tier, n) => {
+        sound.jackpot();
+        if (tier === 'GRAND') window.setTimeout(() => sound.jackpot(), 2600);
+        lcd.flash(tier === 'GRAND' ? 8 : 4);
+        showBanner(`${tier} JACKPOT!!\n+${n.toLocaleString()}`, tier === 'GRAND' ? 'grand' : 'jackpot');
+        payout.add(n, true);
+      },
+      jackpotChange: (pools) => {
         try {
-          localStorage.setItem(JACKPOT_STORAGE_KEY, String(v));
+          localStorage.setItem(JACKPOT_STORAGE_KEY, JSON.stringify(pools));
         } catch {
           // 保存できなくても続行
         }
       },
+      feverStart: () => {
+        sound.fever();
+        payout.add(FEVER_RAIN);
+      },
+      feverExtend: () => sound.fever(),
+      feverEnd: () => showBanner('FEVER 終了', 'lost'),
     },
-    loadJackpot(),
+    loadJackpots(),
   );
 
   /** サイコロボールを入賞口の枠より下、左右どちらかに出す */
@@ -149,6 +166,12 @@ async function main(): Promise<void> {
     cardGet: () => {
       sound.cardGet();
       updateCards();
+    },
+    baseComplete: (n) => {
+      sound.jackpot();
+      lcd.flash(4);
+      showBanner(`宇宙制覇！！\n+${n}`, 'jackpot');
+      payout.add(n, true);
     },
     goal: (n, sq) => {
       payout.add(n);
@@ -205,13 +228,13 @@ async function main(): Promise<void> {
   updateMute();
 
   let bannerTimer = 0;
-  function showBanner(text: string, kind: 'win' | 'big' | 'chance' | 'jackpot' | 'ball' | 'lost'): void {
+  function showBanner(text: string, kind: 'win' | 'big' | 'chance' | 'jackpot' | 'grand' | 'ball' | 'lost'): void {
     banner.textContent = text;
     banner.className = '';
     void banner.offsetWidth;
     banner.className = `show ${kind}`;
     window.clearTimeout(bannerTimer);
-    bannerTimer = window.setTimeout(() => (banner.className = ''), kind === 'jackpot' ? 4000 : 1800);
+    bannerTimer = window.setTimeout(() => (banner.className = ''), kind === 'grand' ? 7000 : kind === 'jackpot' ? 4000 : 1800);
   }
 
   function popup(text: string): void {
@@ -349,6 +372,11 @@ async function main(): Promise<void> {
         board.debugCard(card);
         updateCards();
       },
+      onGrand: () => {
+        slot.forceTier = 'GRAND';
+        slot.addJackpotChance();
+      },
+      onAlmostComplete: () => board.debugAlmostComplete(),
       onBoardReset: () => {
         board.reset();
         updateCards();
@@ -506,8 +534,8 @@ async function main(): Promise<void> {
 }
 
 function lightModeFor(slot: SlotMachine, payout: Payout, board: Sugoroku): LightMode {
-  if (payout.jackpotActive || (slot.mode === 'rouletteResult' && slot.lastRoulette?.jackpot)) return 'jackpot';
-  if (slot.mode === 'chance' || slot.mode === 'roulette' || board.mode === 'goal') return 'chance';
+  if (payout.jackpotActive || slot.fever || (slot.mode === 'rouletteResult' && slot.lastRoulette?.jackpot)) return 'jackpot';
+  if (slot.mode === 'chance' || slot.mode === 'roulette' || slot.mode === 'jpSelect' || board.mode === 'goal') return 'chance';
   if (board.mode === 'roll' || board.mode === 'move') return 'spin';
   if (payout.active || (slot.mode === 'result' && slot.lastWin) || slot.mode === 'rouletteResult') return 'win';
   if (slot.mode === 'spin') return 'spin';
@@ -518,14 +546,22 @@ function clamp(v: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, v));
 }
 
-function loadJackpot(): number {
+function loadJackpots(): Partial<Record<JackpotTier, number>> {
   try {
-    const n = Number.parseFloat(localStorage.getItem(JACKPOT_STORAGE_KEY) ?? '');
-    if (Number.isFinite(n) && n >= JACKPOT_BASE) return n;
+    const raw = localStorage.getItem(JACKPOT_STORAGE_KEY);
+    if (raw) {
+      const d = JSON.parse(raw) as Record<string, unknown>;
+      const out: Partial<Record<JackpotTier, number>> = {};
+      for (const t of JACKPOT_TIERS) if (typeof d[t] === 'number' && Number.isFinite(d[t])) out[t] = d[t] as number;
+      return out;
+    }
+    // 旧バージョン（1段階）のジャックポットは MINI に引き継ぐ
+    const old = Number.parseFloat(localStorage.getItem(OLD_JACKPOT_STORAGE_KEY) ?? '');
+    if (Number.isFinite(old)) return { MINI: old };
   } catch {
     // 読めなければ初期値
   }
-  return JACKPOT_BASE;
+  return {};
 }
 
 function flash(el: HTMLElement): void {

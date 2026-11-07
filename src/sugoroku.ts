@@ -1,4 +1,5 @@
 import {
+  BASE_COMPLETE_BONUS,
   BOARD,
   CARD_INFO,
   DEST_MAX_DISTANCE,
@@ -22,6 +23,8 @@ export interface SugorokuEvents {
   /** 持っている基地に止まった：配当 n 枚 */
   baseIncome(n: number, sq: Square): void;
   cardGet(card: CardType): void;
+  /** 基地を全部そろえた：n 枚払い出し（基地はリセット） */
+  baseComplete(n: number): void;
   /** 目的地に着いた：基地の配当＋ボーナスで n 枚払い出し。このあとジャックポットチャンス */
   goal(n: number, sq: Square): void;
   /** 流星群カード */
@@ -95,6 +98,11 @@ export class Sugoroku {
   /** 目的地まであと何マスか */
   get distanceToDest(): number {
     return (this.dest - this.pos + BOARD.length) % BOARD.length;
+  }
+
+  /** 基地マスの数 */
+  get baseTotal(): number {
+    return BOARD.filter((s) => s.type === 'base').length;
   }
 
   get ownedCount(): number {
@@ -237,7 +245,16 @@ export class Sugoroku {
       case 'base':
         if (!this.owned[this.pos]) {
           this.owned[this.pos] = true;
-          this.setMessage(`${sq.name} 獲得！`, `目的地で毎回 +${sq.value}`);
+          if (this.ownedCount === this.baseTotal) {
+            // 全部そろった：宇宙制覇ボーナス。基地はリセットして、また集め直せる
+            this.setMessage('宇宙制覇！！', `全基地コンプリート +${BASE_COMPLETE_BONUS}`);
+            this.owned = BOARD.map(() => false);
+            this.events.baseComplete(BASE_COMPLETE_BONUS);
+            this.save();
+            this.setMode('goal');
+            return;
+          }
+          this.setMessage(`${sq.name} 獲得！`, `目的地で毎回 +${sq.value}（${this.ownedCount}/${this.baseTotal}）`);
           this.events.baseGet(sq);
         } else {
           const n = Math.ceil(sq.value / 2);
@@ -321,6 +338,22 @@ export class Sugoroku {
     this.pickDestination();
     this.setMessage('');
     this.setMode('idle');
+    this.save();
+  }
+
+  /** デバッグ用：基地をあと1つでコンプリートの状態にする */
+  debugAlmostComplete(): void {
+    let left = -1;
+    BOARD.forEach((sq, i) => {
+      if (sq.type !== 'base') return;
+      this.owned[i] = true;
+      left = i;
+    });
+    this.owned[left] = false;
+    // 残りの1つの手前に移動しておく
+    this.pos = (left - 1 + BOARD.length) % BOARD.length;
+    if (this.dest === left || this.dest === this.pos) this.dest = (this.pos + 10) % BOARD.length;
+    this.dirty = true;
     this.save();
   }
 

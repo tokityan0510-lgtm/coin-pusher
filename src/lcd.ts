@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { BOARD, CARD_INFO, JP_ROULETTE, SLOT_MAX_STOCK, type SlotSymbol } from './config';
+import { BOARD, CARD_INFO, JACKPOT_TIERS, JP_ROULETTE, SLOT_MAX_STOCK, type JackpotTier, type SlotSymbol } from './config';
 import { SlotMachine } from './slot';
 import type { Sugoroku } from './sugoroku';
 import { starPath } from './textures';
@@ -53,7 +53,14 @@ export class Lcd {
     const flashing = this.flashTime > 0;
     if (flashing) this.flashTime -= dt;
     const animating =
-      flashing || slot.reach || slot.mode === 'spin' || slot.mode === 'chance' || slot.mode === 'roulette' || board.busy;
+      flashing ||
+      slot.reach ||
+      slot.fever ||
+      slot.mode === 'spin' ||
+      slot.mode === 'chance' ||
+      slot.mode === 'roulette' ||
+      slot.mode === 'jpSelect' ||
+      board.busy;
     const blinkDue = this.time - this.lastDraw > 0.25;
     if (!slot.dirty && !board.dirty && !animating && !blinkDue) return;
     slot.dirty = false;
@@ -83,7 +90,7 @@ export class Lcd {
       g.fillRect(x, y, 1.5, 1.5);
     }
 
-    this.drawHeader(slot, board);
+    this.drawHeader(slot);
     this.drawBoard(board, on);
     this.drawCenter(slot, board, on);
     this.drawBottom(slot, board, on);
@@ -91,25 +98,37 @@ export class Lcd {
 
   // ------------------------------------------------------------------ 上段
 
-  private drawHeader(slot: SlotMachine, board: Sugoroku): void {
+  private drawHeader(slot: SlotMachine): void {
     const g = this.g;
-    g.fillStyle = 'rgba(0,0,0,0.5)';
+    g.fillStyle = 'rgba(0,0,0,0.55)';
     g.fillRect(0, 0, W, HEADER_H);
     g.textBaseline = 'middle';
-    g.textAlign = 'left';
-    g.font = 'bold 15px system-ui, sans-serif';
-    g.fillStyle = '#ff6b9a';
-    g.fillText('JACKPOT', 10, 17);
-    g.font = 'bold 24px system-ui, sans-serif';
-    g.fillStyle = '#ffd84a';
-    g.shadowColor = '#ff9a00';
-    g.shadowBlur = 8;
-    g.fillText(String(slot.jackpotDisplay), 88, 17);
-    g.shadowBlur = 0;
-    g.textAlign = 'right';
-    g.font = 'bold 15px system-ui, sans-serif';
-    g.fillStyle = '#9fd8ff';
-    g.fillText(`目的地 ${board.destSquare.name}　あと ${board.distanceToDest} マス`, W - 10, 17);
+    // GRAND / MAJOR / MINI を横に並べる（GRAND を一番目立たせる）
+    const cols: [JackpotTier, number, number][] = [
+      ['GRAND', 6, 196],
+      ['MAJOR', 206, 150],
+      ['MINI', 360, 146],
+    ];
+    for (const [tier, x, w] of cols) {
+      const c = TIER_COLOR[tier];
+      roundRect(g, x, 3, w, HEADER_H - 6, 6);
+      g.fillStyle = 'rgba(255,255,255,0.06)';
+      g.fill();
+      g.strokeStyle = c;
+      g.lineWidth = 1.5;
+      g.stroke();
+      g.textAlign = 'left';
+      g.font = `bold ${tier === 'GRAND' ? 14 : 12}px system-ui, sans-serif`;
+      g.fillStyle = c;
+      g.fillText(tier, x + 7, 17);
+      g.textAlign = 'right';
+      g.font = `bold ${tier === 'GRAND' ? 22 : 18}px system-ui, sans-serif`;
+      g.fillStyle = '#fff';
+      g.shadowColor = c;
+      g.shadowBlur = 8;
+      g.fillText(slot.jackpotDisplay(tier).toLocaleString(), x + w - 7, 17);
+      g.shadowBlur = 0;
+    }
   }
 
   // ------------------------------------------------------------------ すごろく
@@ -216,6 +235,10 @@ export class Lcd {
     g.textAlign = 'center';
     g.textBaseline = 'middle';
 
+    if (slot.mode === 'jpSelect' || (slot.mode === 'rouletteResult' && slot.lastRoulette?.jackpot)) {
+      this.drawJpSelect(slot, x0, x1, cy, on);
+      return;
+    }
     if (slot.mode === 'chance' || slot.mode === 'roulette' || slot.mode === 'rouletteResult') {
       this.drawRoulette(slot, cx, cy, on);
       return;
@@ -246,11 +269,11 @@ export class Lcd {
     // ふだんの表示：現在地・基地・配当
     g.font = 'bold 15px system-ui, sans-serif';
     g.fillStyle = '#cfe6ff';
-    g.fillText(`現在地　${board.square.name}`, cx, y0 + 18);
+    g.fillText(`${board.square.name} → 目的地 ${board.destSquare.name}（あと ${board.distanceToDest} マス）`, cx, y0 + 18);
     g.font = 'bold 14px system-ui, sans-serif';
     g.fillStyle = '#ffd36b';
     const total = BOARD.filter((s) => s.type === 'base').length;
-    g.fillText(`基地 ${board.ownedCount}/${total}　目的地の配当 +${board.dividend}`, cx, y0 + 42);
+    g.fillText(`基地 ${board.ownedCount}/${total}（全部で +500）　目的地の配当 +${board.dividend}`, cx, y0 + 42);
     g.font = '13px system-ui, sans-serif';
     g.fillStyle = 'rgba(255,255,255,0.7)';
     const cards = board.cards.length ? board.cards.map((c) => CARD_INFO[c].name).join('・') : 'なし';
@@ -260,6 +283,32 @@ export class Lcd {
       g.fillStyle = on ? '#ffe14a' : '#ffffff';
       g.fillText(`サイコロ待ち ×${board.pending}`, cx, y0 + 86);
     }
+  }
+
+  /** ジャックポットの段の抽選：3つの枠をハイライトが回って止まる */
+  private drawJpSelect(slot: SlotMachine, x0: number, x1: number, cy: number, on: boolean): void {
+    const g = this.g;
+    const done = slot.mode === 'rouletteResult';
+    const w = (x1 - x0 - 40) / 3;
+    JACKPOT_TIERS.forEach((tier, i) => {
+      const x = x0 + 10 + i * (w + 10);
+      const lit = slot.jpSelectIndex === i;
+      const c = TIER_COLOR[tier];
+      roundRect(g, x, cy - 34, w, 68, 8);
+      g.fillStyle = lit ? (done && !on ? '#000' : c) : 'rgba(255,255,255,0.08)';
+      g.fill();
+      g.strokeStyle = c;
+      g.lineWidth = lit ? 4 : 2;
+      g.stroke();
+      g.textAlign = 'center';
+      g.font = `bold ${tier === 'GRAND' ? 20 : 17}px system-ui, sans-serif`;
+      g.fillStyle = lit && !(done && !on) ? '#1a0a00' : c;
+      g.fillText(tier, x + w / 2, cy - 12);
+      g.font = 'bold 18px system-ui, sans-serif';
+      g.fillStyle = lit && !(done && !on) ? '#1a0a00' : '#ffffff';
+      const amount = done && lit && slot.lastRoulette ? slot.lastRoulette.payout : slot.jackpotDisplay(tier);
+      g.fillText(amount.toLocaleString(), x + w / 2, cy + 14);
+    });
   }
 
   private drawRoulette(slot: SlotMachine, cx: number, cy: number, on: boolean): void {
@@ -307,9 +356,7 @@ export class Lcd {
     g.font = 'bold 20px system-ui, sans-serif';
     g.fillStyle = on ? '#ffd84a' : '#ff5c8a';
     const label = slot.mode === 'rouletteResult' && slot.lastRoulette
-      ? slot.lastRoulette.jackpot
-        ? 'JACKPOT!!'
-        : `+${slot.lastRoulette.payout}`
+      ? `+${slot.lastRoulette.payout}`
       : 'JP CHANCE';
     g.fillText(label, cx - 120, cy + 6);
     g.fillText(label, cx + 120, cy + 6);
@@ -379,6 +426,26 @@ export class Lcd {
     g.fillStyle = 'rgba(255,255,255,0.65)';
     g.fillText('★★★ でサイコロボール', rx, top + 40);
 
+    if (slot.fever) {
+      // フィーバー中：残り秒数を虹色で
+      const hue = (this.time * 240) % 360;
+      g.textAlign = 'center';
+      g.font = 'italic 900 30px system-ui, sans-serif';
+      g.fillStyle = `hsl(${hue},100%,62%)`;
+      g.shadowColor = `hsl(${(hue + 180) % 360},100%,50%)`;
+      g.shadowBlur = 12;
+      g.fillText('FEVER', cxr, top + 64);
+      g.font = 'bold 18px system-ui, sans-serif';
+      g.fillStyle = '#ffffff';
+      g.fillText(`残り ${Math.ceil(slot.feverTime)} 秒・当たり2倍`, cxr, top + 94);
+      g.shadowBlur = 0;
+      if (slot.mode === 'result' && slot.lastWin && slot.lastWin.payout > 0) {
+        g.font = 'bold 16px system-ui, sans-serif';
+        g.fillStyle = '#7dffb0';
+        g.fillText(`WIN +${slot.lastWin.payout}`, cxr, top + 36);
+      }
+      return;
+    }
     let msg = '';
     let color = '#ffffff';
     if (slot.mode === 'result' && slot.lastWin?.symbol === 'STAR') {
@@ -407,6 +474,12 @@ export class Lcd {
 }
 
 // -------------------------------------------------------------------- 描画部品
+
+const TIER_COLOR: Record<JackpotTier, string> = {
+  GRAND: '#ffd84a',
+  MAJOR: '#ff6b9a',
+  MINI: '#6bd0ff',
+};
 
 function roundRect(g: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
   g.beginPath();
