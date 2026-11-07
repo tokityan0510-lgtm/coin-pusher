@@ -107,6 +107,16 @@ export const CURTAIN_FRONT_Z = -8.0;
 /** プッシャー上面と仕切り板下端のすき間（メダル厚より小さくして潜り込みを防ぐ） */
 export const CURTAIN_GAP = 0.12;
 
+// ---- 入賞口（チャッカー） ----
+// 仕切り板の中央下部に開いた口。プッシャーが引くとき、上に乗ったメダルが仕切り板で止められずに
+// この口へ押し込まれる（＝入賞）。狙う位置（中央）と投入タイミング（プッシャーが前に出ているとき）で入りやすさが変わる。
+/** 口の幅 */
+export const POCKET_WIDTH = 1.5;
+/** 口の上端の高さ（プッシャー上面からの高さ）。メダル2枚重ねまで入る */
+export const POCKET_HEIGHT = 0.5;
+/** メダル中心がこの z より奥に入ったら入賞として削除 */
+export const POCKET_ENTER_Z = -8.15;
+
 // ---- 投入 ----
 export const DROP_Y = PUSHER_HEIGHT + 2.2;
 export const DROP_Z = -6.6;
@@ -125,3 +135,47 @@ export const STORAGE_KEY = 'coinPusher.credits.v1';
 export const INITIAL_CREDITS = 100;
 /** 所持0枚のときの補充ボタンで増える枚数（フェーズ1の検証用） */
 export const REFILL_CREDITS = 50;
+
+// ---- スロット ----
+/** 保留の最大数（入賞口に入っても、これ以上は貯まらない） */
+export const SLOT_MAX_STOCK = 4;
+/** スロットの図柄。リール帯はこの並びの繰り返し */
+export type SlotSymbol = '7' | 'BAR' | 'STAR' | 'BELL' | 'CHERRY';
+export const REEL_STRIP: SlotSymbol[] = [
+  '7', 'CHERRY', 'BELL', 'BAR', 'CHERRY', 'STAR', 'BELL', 'CHERRY', 'BAR', 'BELL', 'CHERRY', 'STAR',
+];
+/**
+ * 1回転ごとの抽選表（上から順に判定。確率の合計が 1 未満の残りはハズレ）。
+ * payout は払い出し枚数。STAR がそろうとジャックポットチャンス（ルーレット）へ。
+ */
+export const SLOT_TABLE: { symbol: SlotSymbol; prob: number; payout: number }[] = [
+  { symbol: '7', prob: 1 / 80, payout: 50 },
+  { symbol: 'BAR', prob: 1 / 40, payout: 20 },
+  { symbol: 'STAR', prob: 1 / 40, payout: 0 },
+  { symbol: 'BELL', prob: 1 / 15, payout: 8 },
+  { symbol: 'CHERRY', prob: 1 / 8, payout: 3 },
+];
+/** ハズレのうちリーチ（左2つがそろう）を見せる割合 */
+export const SLOT_FAKE_REACH_RATE = 0.2;
+
+// ---- ジャックポット ----
+/** ジャックポットの初期枚数（当たったらここに戻る） */
+export const JACKPOT_BASE = 100;
+/** 入賞1回ごとにジャックポットに積み増す枚数 */
+export const JACKPOT_ADD_PER_POCKET = 1;
+/** ジャックポットチャンスのルーレット。'JP' に止まるとジャックポット */
+export const JP_ROULETTE: (number | 'JP')[] = ['JP', 10, 20, 10, 30, 10, 20, 50];
+/** ルーレットで 'JP' に止まる確率 */
+export const JP_WIN_PROB = 1 / 6;
+export const JACKPOT_STORAGE_KEY = 'coinPusher.jackpot.v1';
+
+// ---- 払い出し（当たりのメダルを盤面に降らせる） ----
+/** 通常の払い出し速度（枚/秒）。プッシャーの上に降る */
+export const PAYOUT_RATE = 8;
+/** ジャックポットの払い出し速度（枚/秒）。盤面全体に降る */
+export const JACKPOT_PAYOUT_RATE = 14;
+/** 盤上のメダルがこの枚数以上のときは払い出しを待つ（処理落ち防止） */
+export const PAYOUT_MAX_ACTIVE = 400;
+
+// ---- 音 ----
+export const MUTE_STORAGE_KEY = 'coinPusher.mute.v1';

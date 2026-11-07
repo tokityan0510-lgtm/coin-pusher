@@ -3,7 +3,7 @@ body {
   margin: 0;
   height: 100%;
   overflow: hidden;
-  background: #0b0f1a;
+  background: #07060f;
   color: #fff;
   font-family: system-ui, -apple-system, 'Hiragino Sans', 'Noto Sans JP', sans-serif;
   /* スクロール・ズーム・長押しメニュー・選択を抑止 */
@@ -30,8 +30,8 @@ body {
   right: 0;
   top: 0;
   pointer-events: none;
-  background: linear-gradient(to bottom, rgba(255, 211, 107, 0.1), rgba(255, 211, 107, 0));
   border-bottom: 1px dashed rgba(255, 211, 107, 0.35);
+  transition: border-color 1s;
   display: flex;
   align-items: flex-end;
   justify-content: center;
@@ -43,55 +43,134 @@ body {
   padding-bottom: 6px;
 }
 
+#drop-zone.hint-off {
+  border-bottom-color: rgba(255, 211, 107, 0.08);
+}
+
+#drop-zone.hint-off span {
+  opacity: 0;
+  transition: opacity 1s;
+}
+
+/* 下部の操作パネル（ゲーセン筐体の手前の CREDIT 表示のイメージ） */
 #hud {
   position: fixed;
   left: 0;
   right: 0;
-  top: env(safe-area-inset-top, 0);
-  padding: 10px 14px;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
+  bottom: 0;
+  padding: 10px 14px calc(10px + env(safe-area-inset-bottom, 0px));
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  grid-template-rows: auto auto;
+  align-items: center;
+  column-gap: 12px;
+  row-gap: 4px;
   pointer-events: none;
+  background: linear-gradient(to top, rgba(10, 6, 24, 0.95), rgba(10, 6, 24, 0.6) 70%, rgba(10, 6, 24, 0));
 }
 
 .credits {
+  position: relative;
+  grid-row: 1 / span 2;
   display: flex;
   align-items: baseline;
   gap: 8px;
-  padding: 4px 12px;
-  border-radius: 999px;
-  background: rgba(0, 0, 0, 0.45);
+  padding: 6px 16px;
+  border-radius: 10px;
+  background: #000;
+  border: 2px solid #b8892a;
+  box-shadow: 0 0 12px rgba(255, 190, 60, 0.35), inset 0 0 10px rgba(255, 190, 60, 0.2);
   font-variant-numeric: tabular-nums;
+}
+
+.credits.bump #credits {
+  animation: bump 0.12s ease-out;
+}
+
+@keyframes bump {
+  50% {
+    transform: scale(1.12);
+  }
 }
 
 .credits .label {
   font-size: 11px;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.12em;
   color: #ffd36b;
 }
 
 #credits {
-  font-size: 24px;
-  font-weight: 700;
+  display: inline-block;
+  min-width: 3ch;
+  text-align: right;
+  font-size: 30px;
+  font-weight: 800;
+  color: #ffe9a8;
+  text-shadow: 0 0 8px rgba(255, 170, 40, 0.8);
+}
+
+#popups {
+  position: absolute;
+  right: 8px;
+  bottom: 100%;
+  pointer-events: none;
+}
+
+.popup {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  font-size: 20px;
+  font-weight: 800;
+  color: #7dffb0;
+  text-shadow: 0 0 6px rgba(0, 0, 0, 0.9);
+  white-space: nowrap;
+  animation: popup 1s ease-out forwards;
+}
+
+@keyframes popup {
+  from {
+    transform: translateY(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateY(-40px);
+    opacity: 0;
+  }
 }
 
 #session {
+  grid-column: 2;
+  grid-row: 1 / span 2;
   font-size: 11px;
   color: rgba(255, 255, 255, 0.6);
-  padding-left: 4px;
+  line-height: 1.5;
+}
+
+#mute {
+  grid-column: 3;
+  grid-row: 1 / span 2;
+  pointer-events: auto;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(0, 0, 0, 0.5);
+  font-size: 20px;
+  line-height: 1;
 }
 
 #refill {
+  position: absolute;
+  left: 14px;
+  bottom: calc(100% + 4px);
   pointer-events: auto;
-  margin-top: 4px;
   font: inherit;
   font-size: 13px;
   padding: 6px 12px;
   border-radius: 8px;
   border: 1px solid #ffd36b;
-  background: rgba(40, 30, 0, 0.8);
+  background: rgba(40, 30, 0, 0.9);
   color: #ffd36b;
 }
 
@@ -106,6 +185,104 @@ body {
   }
 }
 
+/* 当たりの大きな文字 */
+#banner {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: 40%;
+  text-align: center;
+  white-space: pre-line;
+  pointer-events: none;
+  font-weight: 900;
+  font-style: italic;
+  opacity: 0;
+  z-index: 5;
+}
+
+#banner.show {
+  animation: banner 1.8s ease-out forwards;
+}
+
+#banner.win {
+  font-size: 40px;
+  color: #7dffb0;
+  text-shadow: 0 0 12px #00c060, 0 3px 0 #003018;
+}
+
+#banner.big {
+  font-size: 54px;
+  color: #ff3d5e;
+  text-shadow: 0 0 16px #ff8a00, 0 4px 0 #400010;
+}
+
+#banner.chance {
+  font-size: 34px;
+  color: #ff5c8a;
+  text-shadow: 0 0 14px #ff0050, 0 3px 0 #400018;
+}
+
+#banner.jackpot {
+  font-size: 58px;
+  line-height: 1.1;
+  color: #ffe14a;
+  text-shadow: 0 0 20px #ff8a00, 0 0 40px #ff3d00, 0 4px 0 #5a2a00;
+  animation: banner-jp 4s ease-out forwards;
+}
+
+@keyframes banner {
+  0% {
+    opacity: 0;
+    transform: scale(2.2);
+  }
+  12% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  80% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.05) translateY(-20px);
+  }
+}
+
+@keyframes banner-jp {
+  0% {
+    opacity: 0;
+    transform: scale(3) rotate(-8deg);
+  }
+  8% {
+    opacity: 1;
+    transform: scale(1) rotate(0);
+  }
+  12%,
+  24%,
+  36%,
+  48%,
+  60%,
+  72% {
+    filter: brightness(1.6);
+  }
+  18%,
+  30%,
+  42%,
+  54%,
+  66% {
+    filter: brightness(1);
+  }
+  88% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.1);
+  }
+}
+
 #loading {
   position: fixed;
   inset: 0;
@@ -113,7 +290,7 @@ body {
   place-items: center;
   font-size: 14px;
   color: rgba(255, 255, 255, 0.7);
-  background: #0b0f1a;
+  background: #07060f;
 }
 
 /* lil-gui をスマホでも触りやすく */

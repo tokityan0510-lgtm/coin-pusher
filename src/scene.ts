@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import {
+  BACK_Z,
+  CURTAIN_FRONT_Z,
   DROP_X_MAX,
   DROP_Y,
   DROP_Z,
@@ -10,20 +12,40 @@ import {
   MAX_MEDALS,
   MEDAL_RADIUS,
   MEDAL_THICKNESS,
+  POCKET_HEIGHT,
+  POCKET_WIDTH,
   PUSHER_HEIGHT,
   PUSHER_LENGTH,
   PUSHER_SIDE_GAP,
+  WALL_HEIGHT,
   WALL_THICKNESS,
   WALL_X,
 } from './config';
-import { boardParts, POSE_STRIDE, type Machine } from './physics';
+import type { Lcd } from './lcd';
+import { boardParts, CURTAIN_TOP, POSE_STRIDE, type Machine } from './physics';
+import {
+  brushedMetalTexture,
+  chanceSignTexture,
+  floorTexture,
+  glowTexture,
+  medalEdgeBump,
+  medalFaceTextures,
+} from './textures';
 
 /** 筐体を手前から見下ろすカメラの仰角（度） */
-const CAMERA_ELEVATION_DEG = 60;
+const CAMERA_ELEVATION_DEG = 56;
 /** 注視点（筐体ローカル空間） */
-const LOOK_AT = new THREE.Vector3(0, 0.6, -3.6);
-/** 画面に収めたい横幅（壁の外側＋少し余白） */
+const LOOK_AT = new THREE.Vector3(0, 1.0, -3.4);
+/** 画面に収めたい横幅（壁の外側） */
 const FIT_WIDTH = (WALL_X + WALL_THICKNESS) * 2;
+
+/** 液晶パネル：仕切り板の上に、奥へ倒して載せる（見下ろす視点から読みやすいように） */
+const LCD_W = 6.6;
+const LCD_H = (LCD_W * 224) / 512;
+const LCD_LEAN_DEG = 38;
+
+/** 電飾の点灯パターン */
+export type LightMode = 'idle' | 'spin' | 'win' | 'chance' | 'jackpot';
 
 export class GameScene {
   readonly renderer: THREE.WebGLRenderer;
@@ -34,55 +56,188 @@ export class GameScene {
 
   private readonly medalMesh: THREE.InstancedMesh;
   private readonly pusherMesh: THREE.Mesh;
+  private readonly keyLight: THREE.DirectionalLight;
+  private readonly frontStrip: THREE.MeshBasicMaterial;
+  private readonly pocketFrame: THREE.MeshBasicMaterial;
+  private readonly bulbs: THREE.InstancedMesh;
+  private readonly glow: THREE.Points;
+  private readonly bulbGroup: number[] = [];
+  private readonly bulbColor = new THREE.Color();
+  private lightMode: LightMode = 'idle';
+  private lightModeTime = 0;
+  private time = 0;
+  private frontFlash = 0;
+  private pocketFlash = 0;
+
   private readonly tmpPos = new THREE.Vector3();
   private readonly tmpQuat = new THREE.Quaternion();
   private readonly tmpQuatB = new THREE.Quaternion();
   private readonly tmpScale = new THREE.Vector3(1, 1, 1);
   private readonly tmpMat = new THREE.Matrix4();
+  private readonly tmpVec = new THREE.Vector3();
 
-  constructor(canvas: HTMLCanvasElement) {
+  constructor(canvas: HTMLCanvasElement, lcd: Lcd) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.05;
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
 
-    this.scene.background = new THREE.Color(0x0b0f1a);
+    this.scene.background = new THREE.Color(0x07060f);
     // 金属メダルの映り込み用。RoomEnvironment は手続き生成なので外部ファイル不要
     const pmrem = new THREE.PMREMGenerator(this.renderer);
     this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    this.scene.environmentIntensity = 0.8;
     pmrem.dispose();
 
-    this.scene.add(new THREE.HemisphereLight(0xdde6ff, 0x202030, 0.6));
-    const key = new THREE.DirectionalLight(0xffffff, 1.6);
-    key.position.set(3, 12, 8);
-    this.scene.add(key);
+    this.scene.add(new THREE.HemisphereLight(0xc8d4ff, 0x301830, 0.5));
+    this.keyLight = new THREE.DirectionalLight(0xfff4e0, 2.0);
+    this.keyLight.position.set(3, 16, 6);
+    this.keyLight.target.position.set(0, 0, -3);
+    this.keyLight.castShadow = true;
+    const sc = this.keyLight.shadow.camera;
+    sc.left = -7;
+    sc.right = 7;
+    sc.top = 9;
+    sc.bottom = -9;
+    sc.near = 4;
+    sc.far = 30;
+    this.keyLight.shadow.mapSize.set(1024, 1024);
+    this.keyLight.shadow.bias = -0.0006;
+    this.keyLight.shadow.normalBias = 0.02;
+    this.scene.add(this.keyLight, this.keyLight.target);
 
     this.scene.add(this.cabinet);
     this.buildBoard();
 
-    // プッシャー
-    const pusherMat = new THREE.MeshStandardMaterial({ color: 0xc9ced6, metalness: 0.8, roughness: 0.3 });
+    // 前面の発光ライン（獲得時に光る）
+    this.frontStrip = new THREE.MeshBasicMaterial({ color: 0xffb020 });
+    const strip = new THREE.Mesh(new THREE.BoxGeometry(FLOOR_X * 2, 0.08, 0.12), this.frontStrip);
+    strip.position.set(0, -0.06, FRONT_Z + 0.06);
+    this.cabinet.add(strip);
+
+    // 入賞口の枠（入ると光る）
+    this.pocketFrame = new THREE.MeshBasicMaterial({ color: 0xff3d6e });
+    this.buildPocket();
+
+    // 液晶
+    this.buildLcd(lcd);
+
+    // プッシャー：上面はヘアライン金属、前面は赤い化粧板
+    const metal = brushedMetalTexture();
+    metal.wrapS = metal.wrapT = THREE.RepeatWrapping;
+    metal.repeat.set(2, 2);
+    const pusherTop = new THREE.MeshStandardMaterial({ map: metal, metalness: 0.85, roughness: 0.35 });
+    const pusherSide = new THREE.MeshStandardMaterial({ color: 0x9aa3b0, metalness: 0.8, roughness: 0.3 });
+    const pusherFront = new THREE.MeshStandardMaterial({
+      color: 0xc0102e,
+      metalness: 0.3,
+      roughness: 0.25,
+      emissive: 0x400010,
+    });
     this.pusherMesh = new THREE.Mesh(
       new THREE.BoxGeometry((FLOOR_X - PUSHER_SIDE_GAP) * 2, PUSHER_HEIGHT, PUSHER_LENGTH),
-      pusherMat,
+      // BoxGeometry の面の順番: +x, -x, +y, -y, +z(前), -z
+      [pusherSide, pusherSide, pusherTop, pusherSide, pusherFront, pusherSide],
     );
+    this.pusherMesh.castShadow = true;
+    this.pusherMesh.receiveShadow = true;
     this.cabinet.add(this.pusherMesh);
 
-    // メダル（InstancedMesh 1つで全枚数を描く）
+    // メダル（InstancedMesh 1つで全枚数を描く）。側面はギザギザ、表裏は刻印
     const medalGeo = new THREE.CylinderGeometry(MEDAL_RADIUS, MEDAL_RADIUS, MEDAL_THICKNESS, 32, 1);
-    const medalMat = new THREE.MeshStandardMaterial({ color: 0xd8b04a, metalness: 0.9, roughness: 0.32 });
-    this.medalMesh = new THREE.InstancedMesh(medalGeo, medalMat, MAX_MEDALS);
+    const face = medalFaceTextures();
+    const edgeBump = medalEdgeBump();
+    edgeBump.repeat.set(1, 1);
+    const faceMat = new THREE.MeshStandardMaterial({
+      map: face.map,
+      bumpMap: face.bump,
+      bumpScale: 2.5,
+      metalness: 0.85,
+      roughness: 0.3,
+    });
+    const edgeMat = new THREE.MeshStandardMaterial({
+      color: 0xd9ad48,
+      bumpMap: edgeBump,
+      bumpScale: 1.5,
+      metalness: 0.9,
+      roughness: 0.3,
+    });
+    // CylinderGeometry のグループ: 0=側面, 1=上面, 2=下面
+    this.medalMesh = new THREE.InstancedMesh(medalGeo, [edgeMat, faceMat, faceMat], MAX_MEDALS);
     this.medalMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.medalMesh.count = 0;
+    this.medalMesh.castShadow = true;
+    this.medalMesh.receiveShadow = true;
     // 全メダルが常に盤面付近にあるので、インスタンス単位の視錐台カリングは不要
     this.medalMesh.frustumCulled = false;
     this.cabinet.add(this.medalMesh);
+
+    // 電飾（電球の玉＋加算合成の光のにじみ）
+    const positions = this.bulbPositions();
+    this.bulbs = new THREE.InstancedMesh(
+      new THREE.SphereGeometry(0.09, 8, 6),
+      new THREE.MeshBasicMaterial({ color: 0xffffff }),
+      positions.length,
+    );
+    const glowGeo = new THREE.BufferGeometry();
+    const posArr = new Float32Array(positions.length * 3);
+    positions.forEach((p, i) => {
+      this.tmpMat.makeTranslation(p.x, p.y, p.z);
+      this.bulbs.setMatrixAt(i, this.tmpMat);
+      this.bulbs.setColorAt(i, this.bulbColor.set(0xffffff));
+      p.toArray(posArr, i * 3);
+    });
+    glowGeo.setAttribute('position', new THREE.BufferAttribute(posArr, 3));
+    glowGeo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(positions.length * 3), 3));
+    this.glow = new THREE.Points(
+      glowGeo,
+      new THREE.PointsMaterial({
+        size: 0.75,
+        map: glowTexture(),
+        vertexColors: true,
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      }),
+    );
+    this.glow.frustumCulled = false;
+    this.cabinet.add(this.bulbs, this.glow);
 
     this.resize();
   }
 
   setTilt(deg: number): void {
     this.cabinet.rotation.x = (deg * Math.PI) / 180;
+  }
+
+  setShadows(on: boolean): void {
+    this.keyLight.castShadow = on;
+    this.renderer.shadowMap.enabled = on;
+    // シェーダーの作り直しが必要
+    this.scene.traverse((o) => {
+      const m = (o as THREE.Mesh).material;
+      if (Array.isArray(m)) m.forEach((x) => (x.needsUpdate = true));
+      else if (m) m.needsUpdate = true;
+    });
+  }
+
+  setLightMode(mode: LightMode): void {
+    if (mode === this.lightMode) return;
+    this.lightMode = mode;
+    this.lightModeTime = 0;
+  }
+
+  /** 手前の発光ラインを光らせる（獲得） */
+  flashFront(): void {
+    this.frontFlash = 1;
+  }
+
+  /** 入賞口の枠を光らせる */
+  flashPocket(): void {
+    this.pocketFlash = 1;
   }
 
   resize(): void {
@@ -93,7 +248,7 @@ export class GameScene {
     // 縦長画面でも筐体の横幅が収まる距離にカメラを引く
     const vFov = (this.camera.fov * Math.PI) / 180;
     const hFov = 2 * Math.atan(Math.tan(vFov / 2) * this.camera.aspect);
-    const dist = Math.max(FIT_WIDTH / 2 / Math.tan(hFov / 2), 14);
+    const dist = Math.max(FIT_WIDTH / 2 / Math.tan(hFov / 2), 15);
     const el = (CAMERA_ELEVATION_DEG * Math.PI) / 180;
     this.camera.position.set(0, LOOK_AT.y + Math.sin(el) * dist, LOOK_AT.z + Math.cos(el) * dist);
     this.camera.lookAt(LOOK_AT);
@@ -115,7 +270,10 @@ export class GameScene {
     return THREE.MathUtils.clamp(-DROP_X_MAX + t * DROP_X_MAX * 2, -DROP_X_MAX, DROP_X_MAX);
   }
 
-  render(machine: Machine, alpha: number): void {
+  render(machine: Machine, alpha: number, dt: number): void {
+    this.time += dt;
+    this.lightModeTime += dt;
+
     // プッシャー（前ステップと現ステップの間を補間）
     const pz = machine.pusherZPrev + (machine.pusherZCurr - machine.pusherZPrev) * alpha;
     this.pusherMesh.position.set(0, PUSHER_HEIGHT / 2, pz);
@@ -143,43 +301,113 @@ export class GameScene {
     this.medalMesh.count = n;
     this.medalMesh.instanceMatrix.needsUpdate = true;
 
+    this.updateLights(dt);
     this.renderer.render(this.scene, this.camera);
   }
 
+  // ------------------------------------------------------------------ 電飾
+
+  private updateLights(dt: number): void {
+    this.frontFlash = Math.max(0, this.frontFlash - dt * 2.5);
+    this.pocketFlash = Math.max(0, this.pocketFlash - dt * 2);
+    const ff = this.frontFlash;
+    this.frontStrip.color.setRGB(1, 0.55 + ff * 0.45, 0.1 + ff * 0.9).multiplyScalar(0.6 + ff * 1.4);
+    const pf = this.pocketFlash;
+    this.pocketFrame.color.setRGB(1, 0.24 + pf * 0.76, 0.43 + pf * 0.57).multiplyScalar(0.7 + pf * 1.3);
+
+    const t = this.time;
+    const mode = this.lightMode;
+    const colors = this.glow.geometry.getAttribute('color') as THREE.BufferAttribute;
+    const c = this.bulbColor;
+    const n = this.bulbs.count;
+    for (let i = 0; i < n; i++) {
+      const group = this.bulbGroup[i];
+      let on: number;
+      switch (mode) {
+        case 'idle':
+          // ゆっくり流れる
+          on = (i + Math.floor(t * 6)) % 4 === 0 ? 1 : 0.18;
+          c.setHSL(group === 0 ? 0.12 : group === 1 ? 0.95 : 0.58, 1, 0.55);
+          break;
+        case 'spin':
+          on = (i + Math.floor(t * 18)) % 3 === 0 ? 1 : 0.25;
+          c.setHSL(0.12, 1, 0.55);
+          break;
+        case 'win':
+          on = Math.floor(t * 10) % 2 === (i % 2) ? 1 : 0.15;
+          c.setHSL(0.13, 1, 0.6);
+          break;
+        case 'chance':
+          on = Math.floor(t * 14) % 2 === 0 ? 1 : 0.1;
+          c.setHSL(0.97, 1, 0.55);
+          break;
+        case 'jackpot':
+          on = 0.6 + 0.4 * Math.sin(t * 20 + i);
+          c.setHSL((i / n + t * 0.8) % 1, 1, 0.55);
+          break;
+      }
+      c.multiplyScalar(on);
+      this.bulbs.setColorAt(i, c);
+      colors.setXYZ(i, c.r, c.g, c.b);
+    }
+    this.bulbs.instanceColor!.needsUpdate = true;
+    colors.needsUpdate = true;
+  }
+
+  // ------------------------------------------------------------------ 組み立て
+
   private projectToScreenX(x: number): number {
-    const v = new THREE.Vector3(x, DROP_Y, DROP_Z);
+    const v = this.tmpVec.set(x, DROP_Y, DROP_Z);
     this.cabinet.updateMatrixWorld();
     v.applyMatrix4(this.cabinet.matrixWorld).project(this.camera);
     return (v.x * 0.5 + 0.5) * window.innerWidth;
   }
 
   private buildBoard(): void {
+    const floorTex = floorTexture(FLOOR_X * 2, FRONT_Z - BACK_Z);
     const mats = {
-      floor: new THREE.MeshStandardMaterial({ color: 0x1d3a6b, metalness: 0.1, roughness: 0.55 }),
+      floor: new THREE.MeshStandardMaterial({ map: floorTex, metalness: 0.2, roughness: 0.45 }),
+      side: new THREE.MeshStandardMaterial({ color: 0x2a1e4a, metalness: 0.5, roughness: 0.35 }),
       wall: new THREE.MeshStandardMaterial({
-        color: 0x9fc4ff,
+        color: 0xbfd6ff,
         metalness: 0.0,
-        roughness: 0.1,
+        roughness: 0.05,
         transparent: true,
-        opacity: 0.18,
+        opacity: 0.14,
         depthWrite: false,
       }),
-      side: new THREE.MeshStandardMaterial({ color: 0x232838, metalness: 0.3, roughness: 0.6 }),
-      curtain: new THREE.MeshStandardMaterial({ color: 0x2b2f3a, metalness: 0.4, roughness: 0.5 }),
-      back: new THREE.MeshStandardMaterial({ color: 0x14171f, metalness: 0.2, roughness: 0.7 }),
+      curtain: new THREE.MeshStandardMaterial({ color: 0x1c1430, metalness: 0.6, roughness: 0.35 }),
+      back: new THREE.MeshStandardMaterial({ color: 0x0c0a14, metalness: 0.2, roughness: 0.7 }),
+      pocket: new THREE.MeshBasicMaterial({ color: 0x050308 }),
     };
     for (const part of boardParts()) {
+      if (part.name === 'lid') continue; // 見えないふた
       const mesh = new THREE.Mesh(
         new THREE.BoxGeometry(part.half[0] * 2, part.half[1] * 2, part.half[2] * 2),
         mats[part.name],
       );
       mesh.position.set(...part.pos);
-      if (part.name === 'wall') mesh.renderOrder = 2;
+      if (part.name === 'wall') {
+        mesh.renderOrder = 2;
+      } else {
+        mesh.receiveShadow = true;
+        mesh.castShadow = part.name !== 'floor';
+      }
       this.cabinet.add(mesh);
     }
 
-    // 左右の溝（見た目だけ。没収エリアなので暗い赤）
-    const gutterMat = new THREE.MeshBasicMaterial({ color: 0x3a0a12 });
+    // 外壁の上のクロームの手すり
+    const chrome = new THREE.MeshStandardMaterial({ color: 0xe8e8f0, metalness: 1, roughness: 0.15 });
+    const wallLen = FRONT_Z - BACK_Z;
+    for (const s of [-1, 1]) {
+      const rail = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, wallLen, 12), chrome);
+      rail.rotation.x = Math.PI / 2;
+      rail.position.set(s * (WALL_X + WALL_THICKNESS / 2), WALL_HEIGHT - 0.5, BACK_Z + wallLen / 2);
+      this.cabinet.add(rail);
+    }
+
+    // 左右の溝（没収エリア）
+    const gutterMat = new THREE.MeshBasicMaterial({ color: 0x2a0610 });
     const gutterW = WALL_X - FLOOR_X;
     const gutterLen = FRONT_Z - GUTTER_START_Z;
     for (const s of [-1, 1]) {
@@ -188,18 +416,97 @@ export class GameScene {
       this.cabinet.add(g);
     }
 
-    // 手前の獲得口（見た目だけ）
-    const trayMat = new THREE.MeshStandardMaterial({ color: 0x0f5132, metalness: 0.2, roughness: 0.6 });
-    const tray = new THREE.Mesh(new THREE.BoxGeometry(FLOOR_X * 2, 0.05, 1.6), trayMat);
-    tray.position.set(0, -1.2, FRONT_Z + 0.9);
+    // 手前の受け皿（見た目だけ）
+    const trayMat = new THREE.MeshStandardMaterial({ color: 0x3a2a08, metalness: 0.8, roughness: 0.3 });
+    const tray = new THREE.Mesh(new THREE.BoxGeometry(FLOOR_X * 2 + 0.4, 0.1, 1.8), trayMat);
+    tray.position.set(0, -1.3, FRONT_Z + 1.0);
     this.cabinet.add(tray);
+  }
 
-    // 手前端のライン
-    const edge = new THREE.Mesh(
-      new THREE.BoxGeometry(FLOOR_X * 2, 0.02, 0.06),
-      new THREE.MeshBasicMaterial({ color: 0xffd36b }),
+  private buildPocket(): void {
+    const z = CURTAIN_FRONT_Z + 0.02;
+    const w = POCKET_WIDTH;
+    const top = PUSHER_HEIGHT + POCKET_HEIGHT;
+    const t = 0.07;
+    // 口の左右と上の光る枠
+    const bars: [number, number, number, number][] = [
+      [-(w / 2 + t / 2), (PUSHER_HEIGHT + top) / 2 + 0.06, t, top - PUSHER_HEIGHT - 0.12 + t],
+      [w / 2 + t / 2, (PUSHER_HEIGHT + top) / 2 + 0.06, t, top - PUSHER_HEIGHT - 0.12 + t],
+      [0, top + t / 2, w + t * 2, t],
+    ];
+    for (const [x, y, bw, bh] of bars) {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, 0.05), this.pocketFrame);
+      m.position.set(x, y, z);
+      this.cabinet.add(m);
+    }
+    // 看板
+    const sign = new THREE.Mesh(
+      new THREE.PlaneGeometry(2.0, 0.5),
+      new THREE.MeshBasicMaterial({ map: chanceSignTexture() }),
     );
-    edge.position.set(0, 0.011, FRONT_Z - 0.03);
-    this.cabinet.add(edge);
+    sign.position.set(0, top + 0.4, z);
+    this.cabinet.add(sign);
+  }
+
+  private lcdFrame(): THREE.Matrix4 {
+    // 仕切り板の上端を下辺として、奥へ LCD_LEAN_DEG 倒した面
+    const a = -(LCD_LEAN_DEG * Math.PI) / 180;
+    const up = new THREE.Vector3(0, Math.cos(a), Math.sin(a));
+    const center = new THREE.Vector3(0, CURTAIN_TOP + 0.15, CURTAIN_FRONT_Z - 0.1).addScaledVector(up, LCD_H / 2 + 0.2);
+    return new THREE.Matrix4().compose(center, new THREE.Quaternion().setFromEuler(new THREE.Euler(a, 0, 0)), new THREE.Vector3(1, 1, 1));
+  }
+
+  private buildLcd(lcd: Lcd): void {
+    const frame = this.lcdFrame();
+    const group = new THREE.Group();
+    frame.decompose(group.position, group.quaternion, group.scale);
+    const screen = new THREE.Mesh(new THREE.PlaneGeometry(LCD_W, LCD_H), new THREE.MeshBasicMaterial({ map: lcd.texture }));
+    screen.position.z = 0.03;
+    const bezel = new THREE.Mesh(
+      new THREE.BoxGeometry(LCD_W + 0.7, LCD_H + 0.7, 0.2),
+      new THREE.MeshStandardMaterial({ color: 0x241a3e, metalness: 0.7, roughness: 0.3 }),
+    );
+    bezel.position.z = -0.08;
+    bezel.castShadow = true;
+    group.add(bezel, screen);
+    this.cabinet.add(group);
+  }
+
+  /** 電球の位置（液晶の枠・左右の壁の上・入賞口の看板の横）。bulbGroup に系統番号を入れる */
+  private bulbPositions(): THREE.Vector3[] {
+    const out: THREE.Vector3[] = [];
+    // 0: 液晶の枠
+    const frame = this.lcdFrame();
+    const hw = LCD_W / 2 + 0.22;
+    const hh = LCD_H / 2 + 0.22;
+    const per = 2 * (hw + hh) * 2;
+    const count = 34;
+    for (let i = 0; i < count; i++) {
+      let d = (i / count) * per;
+      let x: number;
+      let y: number;
+      if (d < hw * 2) [x, y] = [-hw + d, hh];
+      else if ((d -= hw * 2) < hh * 2) [x, y] = [hw, hh - d];
+      else if ((d -= hh * 2) < hw * 2) [x, y] = [hw - d, -hh];
+      else [x, y] = [-hw, -hh + (d - hw * 2)];
+      out.push(new THREE.Vector3(x, y, 0.05).applyMatrix4(frame));
+      this.bulbGroup.push(0);
+    }
+    // 1: 左右の壁の上
+    for (const s of [-1, 1]) {
+      for (let z = CURTAIN_FRONT_Z; z <= FRONT_Z + 0.01; z += 0.85) {
+        out.push(new THREE.Vector3(s * (WALL_X + WALL_THICKNESS / 2), WALL_HEIGHT - 0.32, z));
+        this.bulbGroup.push(1);
+      }
+    }
+    // 2: 入賞口の看板の左右
+    const top = PUSHER_HEIGHT + POCKET_HEIGHT + 0.4;
+    for (const s of [-1, 1]) {
+      for (let k = 0; k < 3; k++) {
+        out.push(new THREE.Vector3(s * (1.2 + k * 0.32), top, CURTAIN_FRONT_Z + 0.06));
+        this.bulbGroup.push(2);
+      }
+    }
+    return out;
   }
 }

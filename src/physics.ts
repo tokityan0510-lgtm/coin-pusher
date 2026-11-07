@@ -20,12 +20,23 @@ import {
   PUSHER_SIDE_GAP,
   PUSHER_STROKE_MAX,
   PUSHER_STROKE_MIN,
+  POCKET_ENTER_Z,
+  POCKET_HEIGHT,
+  POCKET_WIDTH,
   GUTTER_WIDTH,
   WALL_HEIGHT,
   WALL_THICKNESS,
   WALL_X,
   type PhysicsParams,
 } from './config';
+
+/** これ以上の速度変化（ユニット/秒、1ステップあたり）を衝突として効果音を鳴らす。重力だけなら 0.5 */
+const IMPACT_DV = 2.5;
+
+/** 仕切り板の厚さ */
+export const CURTAIN_T = 0.4;
+/** 仕切り板の上端（この上に液晶パネルが奥へ傾いて載る） */
+export const CURTAIN_TOP = PUSHER_HEIGHT + 1.2;
 
 /** 1枚あたりの姿勢データ: x y z qx qy qz qw */
 export const POSE_STRIDE = 7;
@@ -35,11 +46,18 @@ export interface StepResult {
   won: number;
   /** 溝・盤外へ落ちた（没収） */
   lost: number;
+  /** 入賞口に入った */
+  pocket: number;
+  /** このステップで起きた衝突の数と最大の強さ（効果音用。速度変化量 ユニット/秒） */
+  impacts: number;
+  impactMax: number;
+  /** 衝突の x 位置の平均（-1..1 に正規化。効果音の左右定位用） */
+  impactPan: number;
 }
 
 /** 静的な盤面パーツ（描画側でも同じ寸法を使う） */
 export interface BoxPart {
-  name: 'floor' | 'side' | 'wall' | 'curtain' | 'back';
+  name: 'floor' | 'side' | 'wall' | 'curtain' | 'back' | 'pocket' | 'lid';
   half: [number, number, number];
   pos: [number, number, number];
 }
@@ -50,7 +68,8 @@ export function boardParts(): BoxPart[] {
   const floorLen = FRONT_Z - BACK_Z;
   const sideLen = GUTTER_START_Z - BACK_Z;
   const curtainBottom = PUSHER_HEIGHT + CURTAIN_GAP;
-  const curtainTop = WALL_HEIGHT + 1.5;
+  const curtainTop = CURTAIN_TOP;
+  const pocketTop = PUSHER_HEIGHT + POCKET_HEIGHT;
   const sides = [-1, 1] as const;
   return [
     // 床（プッシャーと同じ幅。左右は溝）
@@ -63,8 +82,8 @@ export function boardParts(): BoxPart[] {
     ...sides.map(
       (s): BoxPart => ({
         name: 'side',
-        half: [GUTTER_WIDTH / 2, WALL_HEIGHT / 2, sideLen / 2],
-        pos: [s * (FLOOR_X + GUTTER_WIDTH / 2), WALL_HEIGHT / 2 - floorT, BACK_Z + sideLen / 2],
+        half: [GUTTER_WIDTH / 2, (CURTAIN_TOP + floorT) / 2, sideLen / 2],
+        pos: [s * (FLOOR_X + GUTTER_WIDTH / 2), (CURTAIN_TOP - floorT) / 2, BACK_Z + sideLen / 2],
       }),
     ),
     // 外壁
@@ -75,11 +94,33 @@ export function boardParts(): BoxPart[] {
         pos: [s * (WALL_X + WALL_THICKNESS / 2), WALL_HEIGHT / 2 - floorT, BACK_Z + floorLen / 2],
       }),
     ),
-    // 仕切り板：プッシャーの上に浮いていて、引いたときに上のメダルを掻き落とす
+    // 仕切り板：プッシャーの上に浮いていて、引いたときに上のメダルを掻き落とす。
+    // 中央下部に入賞口が開いているので、左・右・口の上の3枚に分けて作る。
+    ...sides.map((s): BoxPart => {
+      const inner = POCKET_WIDTH / 2;
+      const halfX = (FLOOR_X - inner) / 2;
+      return {
+        name: 'curtain',
+        half: [halfX, (curtainTop - curtainBottom) / 2, CURTAIN_T / 2],
+        pos: [s * (inner + halfX), (curtainTop + curtainBottom) / 2, CURTAIN_FRONT_Z - CURTAIN_T / 2],
+      };
+    }),
     {
       name: 'curtain',
-      half: [FLOOR_X, (curtainTop - curtainBottom) / 2, 0.2],
-      pos: [0, (curtainTop + curtainBottom) / 2, CURTAIN_FRONT_Z - 0.2],
+      half: [POCKET_WIDTH / 2, (curtainTop - pocketTop) / 2, CURTAIN_T / 2],
+      pos: [0, (curtainTop + pocketTop) / 2, CURTAIN_FRONT_Z - CURTAIN_T / 2],
+    },
+    // 入賞口の奥の止め板（入賞判定の前に奥へ抜けないように）
+    {
+      name: 'pocket',
+      half: [POCKET_WIDTH / 2 + 0.2, (pocketTop - PUSHER_HEIGHT) / 2 + 0.1, 0.1],
+      pos: [0, (pocketTop + PUSHER_HEIGHT) / 2 + 0.1, CURTAIN_FRONT_Z - 1.4],
+    },
+    // 仕切り板より奥のふた（見えない。メダルが仕切りを越えて奥へ入らないように）。上に液晶パネルが載る
+    {
+      name: 'lid',
+      half: [WALL_X, 0.1, (CURTAIN_FRONT_Z - CURTAIN_T - BACK_Z) / 2],
+      pos: [0, curtainTop - 0.1, (CURTAIN_FRONT_Z - CURTAIN_T + BACK_Z) / 2],
     },
     // 一番奥の壁（念のため）
     {
@@ -106,6 +147,9 @@ export class Machine {
   /** 直近 world.step() にかかった時間（ms） */
   lastStepMs = 0;
 
+  /** 各メダルの前ステップの速度（衝突検出用） */
+  private readonly vel = new Float32Array(MAX_MEDALS * 3);
+  private readonly result: StepResult = { won: 0, lost: 0, pocket: 0, impacts: 0, impactMax: 0, impactPan: 0 };
   private readonly boardColliders: RAPIER.Collider[] = [];
   private readonly pusherCollider: RAPIER.Collider;
   private pusherPhase = 0;
@@ -159,6 +203,11 @@ export class Machine {
     }
   }
 
+  /** プッシャーの位相（0..1。0 が最も引いた位置） */
+  get pusherPhaseValue(): number {
+    return this.pusherPhase;
+  }
+
   setPusherRunning(running: boolean): void {
     this.pusherRunning = running;
   }
@@ -186,10 +235,11 @@ export class Machine {
     this.medals.push(body);
     this.readPose(i, this.currPose);
     this.prevPose.set(this.currPose.subarray(i * POSE_STRIDE, (i + 1) * POSE_STRIDE), i * POSE_STRIDE);
+    this.vel.fill(0, i * 3, i * 3 + 3);
     return true;
   }
 
-  /** 1ステップ進める。盤外へ出たメダルは判定して必ず削除する。 */
+  /** 1ステップ進める。盤外へ出たメダル・入賞したメダルは判定して必ず削除する。 */
   step(): StepResult {
     const p = this.params;
     if (this.pusherRunning) this.pusherPhase = (this.pusherPhase + p.pusherSpeed * FIXED_DT) % 1;
@@ -205,11 +255,38 @@ export class Machine {
     const n = this.medals.length;
     this.prevPose.set(this.currPose.subarray(0, n * POSE_STRIDE));
 
-    const result: StepResult = { won: 0, lost: 0 };
+    const result = this.result;
+    result.won = result.lost = result.pocket = result.impacts = 0;
+    result.impactMax = 0;
+    let panSum = 0;
+    const inv = 1 / FIXED_DT;
+    const vel = this.vel;
     for (let i = n - 1; i >= 0; i--) {
       const body = this.medals[i];
-      if (!body.isSleeping()) this.readPose(i, this.currPose);
       const o = i * POSE_STRIDE;
+      const vo = i * 3;
+      if (!body.isSleeping()) {
+        this.readPose(i, this.currPose);
+        // 姿勢の差から速度を出し、前ステップからの速度変化が大きければ「衝突」とみなす（効果音用）。
+        // 物理エンジンの接触イベントを使うより安く、押されて動くだけの穏やかな変化は拾わない。
+        const vx = (this.currPose[o] - this.prevPose[o]) * inv;
+        const vy = (this.currPose[o + 1] - this.prevPose[o + 1]) * inv;
+        const vz = (this.currPose[o + 2] - this.prevPose[o + 2]) * inv;
+        const dvx = vx - vel[vo];
+        const dvy = vy - vel[vo + 1];
+        const dvz = vz - vel[vo + 2];
+        const dv = Math.sqrt(dvx * dvx + dvy * dvy + dvz * dvz);
+        if (dv > IMPACT_DV) {
+          result.impacts++;
+          if (dv > result.impactMax) result.impactMax = dv;
+          panSum += this.currPose[o];
+        }
+        vel[vo] = vx;
+        vel[vo + 1] = vy;
+        vel[vo + 2] = vz;
+      } else {
+        vel[vo] = vel[vo + 1] = vel[vo + 2] = 0;
+      }
       const x = this.currPose[o];
       const y = this.currPose[o + 1];
       const z = this.currPose[o + 2];
@@ -226,8 +303,14 @@ export class Machine {
         if (won) result.won++;
         else result.lost++;
         this.removeAt(i);
+      } else if (z < POCKET_ENTER_Z && y > PUSHER_HEIGHT - 0.2) {
+        // 仕切り板より奥に入れるのは入賞口だけ。口の幅の中なら入賞、それ以外（万一の回り込み）は没収
+        if (Math.abs(x) < POCKET_WIDTH / 2 + 0.1) result.pocket++;
+        else result.lost++;
+        this.removeAt(i);
       }
     }
+    result.impactPan = result.impacts > 0 ? clamp(panSum / result.impacts / WALL_X, -1, 1) : 0;
     return result;
   }
 
@@ -321,6 +404,7 @@ export class Machine {
       const dst = i * POSE_STRIDE;
       this.currPose.copyWithin(dst, src, src + POSE_STRIDE);
       this.prevPose.copyWithin(dst, src, src + POSE_STRIDE);
+      this.vel.copyWithin(i * 3, last * 3, last * 3 + 3);
     }
     this.medals.pop();
   }
