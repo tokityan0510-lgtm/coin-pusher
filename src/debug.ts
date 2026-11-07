@@ -34,6 +34,9 @@ export interface DebugHooks {
   onRoll: () => void;
   onCard: (card: CardType) => void;
   onBoardReset: () => void;
+  /** 大当たりの確認 */
+  onGrand: () => void;
+  onAlmostComplete: () => void;
   /** 影の有無 */
   onShadows: (on: boolean) => void;
 }
@@ -91,9 +94,13 @@ export function createDebugPanel(hooks: DebugHooks): GUI {
     warp: () => hooks.onCard('warp'),
     turbo: () => hooks.onCard('turbo'),
     reset: () => hooks.onBoardReset(),
+    grand: () => hooks.onGrand(),
+    almost: () => hooks.onAlmostComplete(),
   };
   slot.add(slotActions, 'stock').name('保留 +1');
-  slot.add(slotActions, 'seven').name('次を 7 揃いにする');
+  slot.add(slotActions, 'seven').name('次を 7 揃い（フィーバー）にする');
+  slot.add(slotActions, 'grand').name('JPチャンス（GRAND 確定）');
+  slot.add(slotActions, 'almost').name('すごろく：基地あと1つにする');
   slot.add(slotActions, 'chance').name('次を ★（サイコロボール）にする');
   slot.add(slotActions, 'ball').name('サイコロボールを出す');
   slot.add(slotActions, 'roll').name('すごろく：サイコロを振る');

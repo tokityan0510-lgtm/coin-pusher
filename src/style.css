@@ -350,6 +350,50 @@ body {
   animation: banner-jp 4s ease-out forwards;
 }
 
+#banner.grand {
+  font-size: 50px;
+  line-height: 1.1;
+  color: #fff3a0;
+  text-shadow: 0 0 24px #ffb000, 0 0 50px #ff3d00, 0 0 80px #ff00aa, 0 4px 0 #5a2a00;
+  animation: banner-grand 7s ease-out forwards;
+}
+
+@keyframes banner-grand {
+  0% {
+    opacity: 0;
+    transform: scale(4) rotate(-12deg);
+  }
+  6% {
+    opacity: 1;
+    transform: scale(1) rotate(0);
+  }
+  10%,
+  20%,
+  30%,
+  40%,
+  50%,
+  60%,
+  70% {
+    filter: brightness(1.8) hue-rotate(0deg);
+  }
+  15%,
+  25%,
+  35%,
+  45%,
+  55%,
+  65% {
+    filter: brightness(1) hue-rotate(60deg);
+  }
+  92% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.15);
+  }
+}
+
 @keyframes banner {
   0% {
     opacity: 0;

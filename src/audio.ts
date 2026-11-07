@@ -267,6 +267,16 @@ export class Sound {
     this.tone(t + 2.1, 'square', 1568, 1568, 0.06, 1.2);
   }
 
+  /** フィーバー突入・延長 */
+  fever(): void {
+    const ctx = this.ready();
+    if (!ctx) return;
+    const t = ctx.currentTime;
+    const seq = [523, 659, 784, 1046, 784, 1046, 1318, 1046, 1318, 1568, 2093];
+    seq.forEach((f, i) => this.tone(t + i * 0.07, 'square', f, f, 0.07, 0.1));
+    this.tone(t + seq.length * 0.07, 'sawtooth', 1568, 2093, 0.07, 0.6);
+  }
+
   /** ルーレットのハズレ（小当たり） */
   smallPrize(): void {
     this.slotWin(false);

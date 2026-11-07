@@ -1,12 +1,17 @@
 import {
-  JACKPOT_ADD_PER_CHUCKER,
-  JACKPOT_BASE,
+  FEVER_EXTEND,
+  FEVER_MULTIPLIER,
+  FEVER_REEL_SPEEDUP,
+  FEVER_TIME,
+  JACKPOT_INFO,
+  JACKPOT_TIERS,
   JP_ROULETTE,
   JP_WIN_PROB,
   REEL_STRIP,
   SLOT_FAKE_REACH_RATE,
   SLOT_MAX_STOCK,
   SLOT_TABLE,
+  type JackpotTier,
   type SlotSymbol,
 } from './config';
 
@@ -22,12 +27,21 @@ export interface SlotEvents {
   ballGet(): boolean;
   jackpotChance(): void;
   rouletteTick(): void;
-  /** ルーレットの結果。jackpot=true ならジャックポット */
-  rouletteResult(jackpot: boolean, payout: number): void;
-  jackpotChange(value: number): void;
+  /** ルーレットの結果（JP 以外）。payout 枚を払い出す */
+  rouletteResult(payout: number): void;
+  /** ルーレットが JP に止まった。これから MINI / MAJOR / GRAND の抽選 */
+  jackpotSelect(): void;
+  /** ジャックポット抽選のハイライトが1つ進んだ */
+  jackpotSelectTick(): void;
+  /** ジャックポット当選。payout 枚を払い出す */
+  jackpotWin(tier: JackpotTier, payout: number): void;
+  jackpotChange(pools: Record<JackpotTier, number>): void;
+  feverStart(): void;
+  feverExtend(): void;
+  feverEnd(): void;
 }
 
-type Mode = 'idle' | 'spin' | 'result' | 'chance' | 'roulette' | 'rouletteResult';
+type Mode = 'idle' | 'spin' | 'result' | 'chance' | 'roulette' | 'jpSelect' | 'rouletteResult';
 
 interface Reel {
   /** 中段に来ている図柄の位置（リール帯の添字、小数） */
@@ -48,6 +62,7 @@ const REEL_STOP_TIMES = [0.9, 1.35, 1.8];
 const REACH_EXTRA = 1.6;
 const STOP_ANIM = 0.28;
 const ROULETTE_TIME = 4.5;
+const JP_SELECT_TIME = 3.6;
 
 /**
  * スロットとジャックポットの状態機械。描画はしない（lcd.ts が state を読んで描く）。
@@ -55,8 +70,13 @@ const ROULETTE_TIME = 4.5;
  */
 export class SlotMachine {
   stock = 0;
-  jackpot: number;
+  /** ジャックポットの貯まり（内部は小数。表示は jackpotDisplay） */
+  jackpots: Record<JackpotTier, number>;
   mode: Mode = 'idle';
+  /** フィーバーの残り秒数（0 ならフィーバーではない） */
+  feverTime = 0;
+  /** ジャックポット抽選でハイライトしている段（0=MINI, 1=MAJOR, 2=GRAND） */
+  jpSelectIndex = 0;
   readonly reels: Reel[] = [0, 1, 2].map((i) => ({
     pos: i * 4,
     stopAt: 0,
@@ -77,7 +97,7 @@ export class SlotMachine {
   /** ルーレットの針の角度（ラジアン）と、止まった区画 */
   rouletteAngle = 0;
   rouletteIndex = -1;
-  lastRoulette: { jackpot: boolean; payout: number } | null = null;
+  lastRoulette: { jackpot: boolean; payout: number; tier?: JackpotTier } | null = null;
   /** 表示を描き直す必要があるか（lcd.ts が見る） */
   dirty = true;
 
@@ -88,22 +108,32 @@ export class SlotMachine {
   private rouletteTo = 0;
   private lastTickSeg = 0;
 
+  private jpTier: JackpotTier = 'MINI';
+  private lastSelectStep = 0;
+  /** この回転がフィーバー中に始まったか（配当を倍にする） */
+  private spinInFever = false;
+
   constructor(
     readonly events: SlotEvents,
-    jackpot: number,
+    jackpots: Partial<Record<JackpotTier, number>>,
   ) {
-    this.jackpot = Math.max(JACKPOT_BASE, jackpot);
+    this.jackpots = { MINI: 0, MAJOR: 0, GRAND: 0 };
+    for (const t of JACKPOT_TIERS) this.jackpots[t] = Math.max(JACKPOT_INFO[t].base, jackpots[t] ?? 0);
   }
 
   /** 表示用のジャックポット枚数（内部は小数で貯める） */
-  get jackpotDisplay(): number {
-    return Math.floor(this.jackpot);
+  jackpotDisplay(tier: JackpotTier): number {
+    return Math.floor(this.jackpots[tier]);
+  }
+
+  get fever(): boolean {
+    return this.feverTime > 0;
   }
 
   /** 入賞1回。保留が満タンでもジャックポットは積み増す */
   addChucker(): boolean {
-    this.jackpot += JACKPOT_ADD_PER_CHUCKER;
-    this.events.jackpotChange(this.jackpot);
+    for (const t of JACKPOT_TIERS) this.jackpots[t] += JACKPOT_INFO[t].addPerChucker;
+    this.events.jackpotChange(this.jackpots);
     this.dirty = true;
     if (this.stock >= SLOT_MAX_STOCK) return false;
     this.stock++;
@@ -112,12 +142,22 @@ export class SlotMachine {
 
   /** デバッグ用：次の回転を強制的に指定の図柄でそろえる */
   forceNext: SlotSymbol | null = null;
+  /** デバッグ用：次のルーレットを JP にして、指定の段を当てる */
+  forceTier: JackpotTier | null = null;
 
   /** boardBusy: すごろくが動いている間はジャックポットチャンスを始めない（液晶の中央を取り合わないように） */
   update(dt: number, boardBusy = false): void {
     this.time += dt;
     this.modeTime += dt;
     this.chanceHold -= dt;
+    if (this.feverTime > 0) {
+      this.feverTime -= dt;
+      if (this.feverTime <= 0) {
+        this.feverTime = 0;
+        this.events.feverEnd();
+      }
+      this.dirty = true;
+    }
     switch (this.mode) {
       case 'idle':
         // ボールが落ちてたまったジャックポットチャンスを、スロットより先に消化する
@@ -126,15 +166,21 @@ export class SlotMachine {
           this.lastWin = null;
           this.setMode('chance');
           this.events.jackpotChance();
-        } else if (this.stock > 0) {
+        } else if (this.stock > 0 || this.fever) {
+          // フィーバー中は保留がなくても回り続ける
           this.startSpin();
         }
         break;
       case 'spin':
         this.updateReels(dt);
         break;
-      case 'result':
-        if (this.modeTime > (this.lastWin ? 2.0 : 0.5)) this.setMode('idle');
+      case 'result': {
+        const wait = this.lastWin ? (this.fever ? 1.1 : 2.0) : this.fever ? 0.25 : 0.5;
+        if (this.modeTime > wait) this.setMode('idle');
+        break;
+      }
+      case 'jpSelect':
+        this.updateJpSelect();
         break;
       case 'chance':
         if (this.modeTime > 1.6) this.startRoulette();
@@ -143,7 +189,7 @@ export class SlotMachine {
         this.updateRoulette();
         break;
       case 'rouletteResult':
-        if (this.modeTime > 3.0) this.setMode('idle');
+        if (this.modeTime > (this.lastRoulette?.jackpot ? 5.0 : 3.0)) this.setMode('idle');
         break;
     }
   }
@@ -161,7 +207,8 @@ export class SlotMachine {
   }
 
   private startSpin(): void {
-    this.stock--;
+    if (this.stock > 0) this.stock--;
+    this.spinInFever = this.fever;
     this.lastWin = null;
     this.reach = false;
     this.outcome = this.draw();
@@ -169,7 +216,7 @@ export class SlotMachine {
     const t0 = this.time;
     this.reels.forEach((r, i) => {
       r.target = targets[i];
-      r.stopAt = t0 + REEL_STOP_TIMES[i];
+      r.stopAt = t0 + REEL_STOP_TIMES[i] * (this.spinInFever ? FEVER_REEL_SPEEDUP : 1);
       r.stopping = false;
       r.stopped = false;
     });
@@ -273,8 +320,19 @@ export class SlotMachine {
       return;
     }
     if (symbol) {
-      this.lastWin = { symbol, payout };
-      this.events.win(symbol, payout);
+      const n = this.spinInFever ? payout * FEVER_MULTIPLIER : payout;
+      this.lastWin = { symbol, payout: n };
+      this.events.win(symbol, n);
+      if (symbol === '7') {
+        // 7・7・7 でフィーバー。フィーバー中なら延長
+        if (this.fever) {
+          this.feverTime += FEVER_EXTEND;
+          this.events.feverExtend();
+        } else {
+          this.feverTime = FEVER_TIME;
+          this.events.feverStart();
+        }
+      }
     } else {
       this.events.miss();
     }
@@ -284,7 +342,7 @@ export class SlotMachine {
   private startRoulette(): void {
     const n = JP_ROULETTE.length;
     let index: number;
-    if (Math.random() < JP_WIN_PROB) {
+    if (this.forceTier || Math.random() < JP_WIN_PROB) {
       index = JP_ROULETTE.indexOf('JP');
     } else {
       const others = JP_ROULETTE.map((v, i) => (v === 'JP' ? -1 : i)).filter((i) => i >= 0);
@@ -317,16 +375,59 @@ export class SlotMachine {
       const idx = ((Math.round(this.rouletteAngle / seg) % n) + n) % n;
       this.rouletteIndex = idx;
       const v = JP_ROULETTE[idx];
-      const jackpot = v === 'JP';
-      const payout = jackpot ? Math.floor(this.jackpot) : (v as number);
-      this.lastRoulette = { jackpot, payout };
-      if (jackpot) {
-        this.jackpot = JACKPOT_BASE;
-        this.events.jackpotChange(this.jackpot);
+      if (v === 'JP') {
+        this.startJpSelect();
+        return;
       }
+      this.lastRoulette = { jackpot: false, payout: v };
       this.setMode('rouletteResult');
-      this.events.rouletteResult(jackpot, payout);
+      this.events.rouletteResult(v);
     }
+  }
+
+  /** JP に止まったら MINI / MAJOR / GRAND を抽選。ハイライトが減速しながら回って止まる */
+  private startJpSelect(): void {
+    if (this.forceTier) {
+      this.jpTier = this.forceTier;
+      this.forceTier = null;
+    } else {
+      let r = Math.random();
+      this.jpTier = 'MINI';
+      for (const t of JACKPOT_TIERS) {
+        if (r < JACKPOT_INFO[t].prob) {
+          this.jpTier = t;
+          break;
+        }
+        r -= JACKPOT_INFO[t].prob;
+      }
+    }
+    this.jpSelectIndex = 0;
+    this.lastSelectStep = 0;
+    this.setMode('jpSelect');
+    this.events.jackpotSelect();
+  }
+
+  private updateJpSelect(): void {
+    const target = JACKPOT_TIERS.indexOf(this.jpTier);
+    const steps = 3 * 6 + target; // 6 周してから止まる
+    const t = Math.min(1, this.modeTime / JP_SELECT_TIME);
+    const p = 1 - Math.pow(1 - t, 2.2);
+    const step = Math.min(steps, Math.floor(p * steps));
+    if (step !== this.lastSelectStep) {
+      this.lastSelectStep = step;
+      this.jpSelectIndex = step % 3;
+      this.events.jackpotSelectTick();
+      this.dirty = true;
+    }
+    if (t < 1) return;
+    this.jpSelectIndex = target;
+    const tier = this.jpTier;
+    const payout = Math.floor(this.jackpots[tier]);
+    this.jackpots[tier] = JACKPOT_INFO[tier].base;
+    this.events.jackpotChange(this.jackpots);
+    this.lastRoulette = { jackpot: true, payout, tier };
+    this.setMode('rouletteResult');
+    this.events.jackpotWin(tier, payout);
   }
 
   /** すごろくで目的地に着いた。今の回転が終わったらジャックポットチャンスへ */

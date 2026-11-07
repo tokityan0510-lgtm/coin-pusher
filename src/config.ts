@@ -168,31 +168,48 @@ export const REEL_STRIP: SlotSymbol[] = [
  * payout は払い出し枚数。STAR がそろうとサイコロボールが盤面に出る（すごろくを進める）。
  */
 export const SLOT_TABLE: { symbol: SlotSymbol; prob: number; payout: number }[] = [
-  { symbol: '7', prob: 1 / 150, payout: 20 },
-  { symbol: 'BAR', prob: 1 / 80, payout: 8 },
+  { symbol: '7', prob: 1 / 200, payout: 100 },
+  { symbol: 'BAR', prob: 1 / 80, payout: 30 },
   { symbol: 'STAR', prob: 1 / 10, payout: 0 },
-  { symbol: 'BELL', prob: 1 / 25, payout: 3 },
-  { symbol: 'CHERRY', prob: 1 / 15, payout: 2 },
+  { symbol: 'BELL', prob: 1 / 30, payout: 5 },
+  { symbol: 'CHERRY', prob: 1 / 20, payout: 2 },
 ];
 /** ハズレのうちリーチ（左2つがそろう）を見せる割合 */
 export const SLOT_FAKE_REACH_RATE = 0.2;
 
-// ---- ジャックポット ----
-/** ジャックポットの初期枚数（当たったらここに戻る） */
-export const JACKPOT_BASE = 100;
-/** 入賞1回ごとにジャックポットに積み増す枚数（小数で貯めて、表示は切り捨て） */
-export const JACKPOT_ADD_PER_CHUCKER = 0.2;
-/** ジャックポットチャンスのルーレット。'JP' に止まるとジャックポット */
-export const JP_ROULETTE: (number | 'JP')[] = ['JP', 5, 10, 5, 20, 5, 10, 30];
+// ---- ジャックポット（3段階） ----
+// ルーレットで JP に止まると、さらに MINI / MAJOR / GRAND のどれかを抽選する。
+export type JackpotTier = 'MINI' | 'MAJOR' | 'GRAND';
+export const JACKPOT_TIERS: JackpotTier[] = ['MINI', 'MAJOR', 'GRAND'];
+export const JACKPOT_INFO: Record<JackpotTier, { base: number; addPerChucker: number; prob: number }> = {
+  /** base: 初期枚数（当たったらここに戻る） / addPerChucker: 入賞1回ごとの積み増し / prob: JP に止まったあとの抽選確率 */
+  MINI: { base: 100, addPerChucker: 0.2, prob: 0.7 },
+  MAJOR: { base: 300, addPerChucker: 0.1, prob: 0.25 },
+  GRAND: { base: 1000, addPerChucker: 0.05, prob: 0.05 },
+};
+/** ジャックポットチャンスのルーレット。'JP' に止まるとジャックポット抽選へ */
+export const JP_ROULETTE: (number | 'JP')[] = ['JP', 10, 20, 10, 50, 10, 20, 100];
 /** ルーレットで 'JP' に止まる確率 */
 export const JP_WIN_PROB = 1 / 8;
-export const JACKPOT_STORAGE_KEY = 'coinPusher.jackpot.v1';
+export const JACKPOT_STORAGE_KEY = 'coinPusher.jackpots.v2';
+/** 旧バージョン（1段階）のジャックポット保存キー。読めたら MINI に引き継ぐ */
+export const OLD_JACKPOT_STORAGE_KEY = 'coinPusher.jackpot.v1';
+
+// ---- フィーバー ----
+// 7・7・7 でフィーバー突入。FEVER_TIME 秒間、スロットが保留なしで回り続け、当たりが FEVER_MULTIPLIER 倍。
+// 突入時にメダル FEVER_RAIN 枚が降る。フィーバー中に 7・7・7 がそろうと FEVER_EXTEND 秒延長。
+export const FEVER_TIME = 30;
+export const FEVER_EXTEND = 15;
+export const FEVER_MULTIPLIER = 2;
+export const FEVER_RAIN = 60;
+/** フィーバー中はリールが速く止まる（停止タイミングに掛ける） */
+export const FEVER_REEL_SPEEDUP = 0.6;
 
 // ---- 払い出し（当たりのメダルを盤面に降らせる） ----
 /** 通常の払い出し速度（枚/秒）。プッシャーの上に降る */
 export const PAYOUT_RATE = 8;
-/** ジャックポットの払い出し速度（枚/秒）。盤面全体に降る */
-export const JACKPOT_PAYOUT_RATE = 14;
+/** ジャックポット等の大きな払い出し速度（枚/秒）。盤面全体に降る */
+export const JACKPOT_PAYOUT_RATE = 16;
 /** 盤上のメダルがこの枚数以上のときは払い出しを待つ（処理落ち防止） */
 export const PAYOUT_MAX_ACTIVE = 400;
 
@@ -228,36 +245,38 @@ export interface Square {
 }
 /** すごろくのマス（一周 24 マス。液晶の外周に並べる） */
 export const BOARD: Square[] = [
-  { type: 'medal', name: '発射場', value: 5 },
+  { type: 'medal', name: '発射場', value: 10 },
   { type: 'base', name: '月面ドーム', value: 4 },
-  { type: 'medal', name: 'シリウス', value: 8 },
+  { type: 'medal', name: 'シリウス', value: 16 },
   { type: 'card', name: '流れ星', value: 0 },
   { type: 'base', name: '火星コロニー', value: 6 },
-  { type: 'medal', name: 'ベガ', value: 5 },
-  { type: 'medal', name: 'アルタイル', value: 12 },
+  { type: 'medal', name: 'ベガ', value: 10 },
+  { type: 'medal', name: 'アルタイル', value: 24 },
   { type: 'base', name: '小惑星鉱山', value: 8 },
   { type: 'card', name: '流れ星', value: 0 },
-  { type: 'medal', name: 'デネブ', value: 5 },
+  { type: 'medal', name: 'デネブ', value: 10 },
   { type: 'base', name: '氷の衛星ラボ', value: 5 },
-  { type: 'medal', name: 'リゲル', value: 15 },
-  { type: 'medal', name: 'スピカ', value: 5 },
+  { type: 'medal', name: 'リゲル', value: 30 },
+  { type: 'medal', name: 'スピカ', value: 10 },
   { type: 'base', name: '木星ガス工場', value: 10 },
   { type: 'card', name: '流れ星', value: 0 },
-  { type: 'medal', name: 'カペラ', value: 8 },
+  { type: 'medal', name: 'カペラ', value: 16 },
   { type: 'base', name: '土星リング港', value: 12 },
-  { type: 'medal', name: 'アンタレス', value: 5 },
-  { type: 'medal', name: 'ポラリス', value: 20 },
+  { type: 'medal', name: 'アンタレス', value: 10 },
+  { type: 'medal', name: 'ポラリス', value: 40 },
   { type: 'base', name: '彗星ステーション', value: 7 },
   { type: 'card', name: '流れ星', value: 0 },
-  { type: 'medal', name: 'プロキオン', value: 5 },
+  { type: 'medal', name: 'プロキオン', value: 10 },
   { type: 'base', name: '星雲ホテル', value: 15 },
-  { type: 'medal', name: 'すばる', value: 10 },
+  { type: 'medal', name: 'すばる', value: 20 },
 ];
 /** 次の目的地は、今の位置からこのマス数以上先から選ぶ */
 export const DEST_MIN_DISTANCE = 7;
 export const DEST_MAX_DISTANCE = 16;
 /** 目的地に着いたときのボーナス（基地の配当とは別） */
-export const GOAL_BONUS = 10;
+export const GOAL_BONUS = 30;
+/** 基地8つを全部そろえたときの「宇宙制覇」ボーナス。もらったあと基地はリセットされ、また集め直せる */
+export const BASE_COMPLETE_BONUS = 500;
 
 /** カード（最大 MAX_CARDS 枚まで持てる。HUD のボタンで使う） */
 export type CardType = 'turbo' | 'shower' | 'ball' | 'warp';
