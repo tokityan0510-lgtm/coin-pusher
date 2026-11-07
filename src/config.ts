@@ -122,9 +122,14 @@ export const CHUCKER_WIDTH = 1.1;
 export const CHUCKER_DEPTH = 1.2;
 /** 枠の中心の高さ。メダル中心がこの高さを上から下へ、穴の中で通過したら入賞 */
 export const CHUCKER_Y = PUSHER_HEIGHT + 1.6;
-/** 枠の太さ・高さ */
-export const CHUCKER_BAR = 0.16;
-export const CHUCKER_BAR_HEIGHT = 0.2;
+/**
+ * 枠は丸くて細い棒（カプセル）。平らな角材だとメダルが上に乗って詰まるので、
+ * 丸い棒にして必ずどちらかへ滑り落ちるようにしている。
+ */
+export const CHUCKER_ROD_R = 0.07;
+/** 枠の太さ・高さ（棒の直径） */
+export const CHUCKER_BAR = CHUCKER_ROD_R * 2;
+export const CHUCKER_BAR_HEIGHT = CHUCKER_ROD_R * 2;
 
 // ---- 投入 ----
 export const DROP_Y = CHUCKER_Y + 1.0;
@@ -140,8 +145,8 @@ export const DROP_X_MAX = FLOOR_X - MEDAL_RADIUS - 0.1;
 export const DROP_SCATTER = 0.8;
 /** 連打の最短間隔（秒） */
 export const DROP_COOLDOWN = 0.08;
-/** オート投入の間隔（秒）。実機のシューターの連射くらい */
-export const AUTO_FIRE_INTERVAL = 0.45;
+/** オート投入の間隔（秒）。1秒に約4.5枚 */
+export const AUTO_FIRE_INTERVAL = 0.22;
 
 // ---- 盤外判定 ----
 /** メダル中心がこの高さを下回ったら盤外として判定・削除 */

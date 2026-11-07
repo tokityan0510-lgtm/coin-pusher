@@ -432,10 +432,18 @@ export class GameScene {
     };
     for (const part of boardParts()) {
       if (part.name === 'lid') continue; // 見えないふた
-      const mesh = new THREE.Mesh(
-        new THREE.BoxGeometry(part.half[0] * 2, part.half[1] * 2, part.half[2] * 2),
-        mats[part.name],
-      );
+      let geo: THREE.BufferGeometry;
+      if (part.rod) {
+        // 丸い棒：Y 向きの円柱を x / z 向きに倒す
+        const len = part.half[part.rod === 'x' ? 0 : 2] * 2;
+        const r = part.half[1];
+        geo = new THREE.CylinderGeometry(r, r, len, 12);
+        if (part.rod === 'x') geo.rotateZ(Math.PI / 2);
+        else geo.rotateX(Math.PI / 2);
+      } else {
+        geo = new THREE.BoxGeometry(part.half[0] * 2, part.half[1] * 2, part.half[2] * 2);
+      }
+      const mesh = new THREE.Mesh(geo, mats[part.name]);
       mesh.position.set(...part.pos);
       if (part.name === 'wall') {
         mesh.renderOrder = 2;

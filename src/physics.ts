@@ -26,9 +26,8 @@ import {
   PUSHER_SIDE_GAP,
   PUSHER_STROKE_MAX,
   PUSHER_STROKE_MIN,
-  CHUCKER_BAR,
-  CHUCKER_BAR_HEIGHT,
   CHUCKER_DEPTH,
+  CHUCKER_ROD_R,
   CHUCKER_WIDTH,
   CHUCKER_Y,
   CHUCKER_Z,
@@ -42,6 +41,9 @@ import {
 
 /** これ以上の速度変化（ユニット/秒、1ステップあたり）を衝突として効果音を鳴らす。重力だけなら 0.5 */
 const IMPACT_DV = 2.5;
+
+/** 入賞口の詰まりチェックの間隔（ステップ数） */
+const UNSTICK_INTERVAL = 20;
 
 /** 仕切り板の厚さ */
 export const CURTAIN_T = 0.4;
@@ -73,7 +75,16 @@ export interface BoxPart {
   name: 'floor' | 'side' | 'wall' | 'lip' | 'curtain' | 'back' | 'chucker' | 'lid';
   half: [number, number, number];
   pos: [number, number, number];
+  /** 指定すると箱ではなく、その軸に沿った丸い棒（カプセル）。半径は残りの軸の half、長さの半分はその軸の half */
+  rod?: 'x' | 'z';
 }
+
+/** カプセル（Y 軸向き）を x / z 軸向きに倒す回転 */
+const S45 = Math.SQRT1_2;
+export const ROD_ROTATION = {
+  x: { x: 0, y: 0, z: S45, w: S45 },
+  z: { x: S45, y: 0, z: 0, w: S45 },
+} as const;
 
 /** 盤面の静的コライダー定義。物理と描画で共有する。配置図は config.ts を参照 */
 export function boardParts(): BoxPart[] {
@@ -120,19 +131,21 @@ export function boardParts(): BoxPart[] {
       half: [FLOOR_X, (curtainTop - curtainBottom) / 2, CURTAIN_T / 2],
       pos: [0, (curtainTop + curtainBottom) / 2, CURTAIN_FRONT_Z - CURTAIN_T / 2],
     },
-    // 入賞口の枠（左右と前後の4本）。投入メダルの落下途中に浮いている
+    // 入賞口の枠（左右と前後の4本の丸い棒）。投入メダルの落下途中に浮いている
     ...sides.map(
       (s): BoxPart => ({
         name: 'chucker',
-        half: [CHUCKER_BAR / 2, CHUCKER_BAR_HEIGHT / 2, CHUCKER_DEPTH / 2 + CHUCKER_BAR],
-        pos: [s * (CHUCKER_WIDTH / 2 + CHUCKER_BAR / 2), CHUCKER_Y, CHUCKER_Z],
+        rod: 'z',
+        half: [CHUCKER_ROD_R, CHUCKER_ROD_R, CHUCKER_DEPTH / 2 + CHUCKER_ROD_R * 2],
+        pos: [s * (CHUCKER_WIDTH / 2 + CHUCKER_ROD_R), CHUCKER_Y, CHUCKER_Z],
       }),
     ),
     ...sides.map(
       (s): BoxPart => ({
         name: 'chucker',
-        half: [CHUCKER_WIDTH / 2, CHUCKER_BAR_HEIGHT / 2, CHUCKER_BAR / 2],
-        pos: [0, CHUCKER_Y, CHUCKER_Z + s * (CHUCKER_DEPTH / 2 + CHUCKER_BAR / 2)],
+        rod: 'x',
+        half: [CHUCKER_WIDTH / 2 + CHUCKER_ROD_R * 2, CHUCKER_ROD_R, CHUCKER_ROD_R],
+        pos: [0, CHUCKER_Y, CHUCKER_Z + s * (CHUCKER_DEPTH / 2 + CHUCKER_ROD_R)],
       }),
     ),
     // 仕切り板より奥のふた（見えない。メダルが仕切りを越えて奥へ入らないように）。上に液晶パネルが載る
@@ -183,6 +196,7 @@ export class Machine {
     impactPan: 0,
   };
   private readonly boardColliders: RAPIER.Collider[] = [];
+  private stepCount = 0;
   private readonly pusherCollider: RAPIER.Collider;
   private pusherPhase = 0;
   private pusherRunning = true;
@@ -194,7 +208,11 @@ export class Machine {
 
     const ground = this.world.createRigidBody(RAPIER.RigidBodyDesc.fixed());
     for (const part of boardParts()) {
-      const desc = RAPIER.ColliderDesc.cuboid(...part.half).setTranslation(...part.pos);
+      const desc = part.rod
+        ? RAPIER.ColliderDesc.capsule(part.half[part.rod === 'x' ? 0 : 2] - CHUCKER_ROD_R, CHUCKER_ROD_R)
+            .setTranslation(...part.pos)
+            .setRotation(ROD_ROTATION[part.rod])
+        : RAPIER.ColliderDesc.cuboid(...part.half).setTranslation(...part.pos);
       this.boardColliders.push(this.world.createCollider(desc, ground));
     }
 
@@ -352,7 +370,37 @@ export class Machine {
     }
     result.impactPan = result.impacts > 0 ? clamp(panSum / result.impacts / WALL_X, -1, 1) : 0;
     this.stepBalls(result);
+    if (++this.stepCount % UNSTICK_INTERVAL === 0) this.unstickChucker();
     return result;
+  }
+
+  /**
+   * 入賞口の枠の上や枠に引っかかって止まったメダルを揺すって落とす（詰まり防止の保険）。
+   * 枠は丸い棒なので普通は乗らないが、メダル同士が重なって支え合うと止まることがある。
+   */
+  private unstickChucker(): void {
+    const n = this.medals.length;
+    for (let i = 0; i < n; i++) {
+      const o = i * POSE_STRIDE;
+      const x = this.currPose[o];
+      const y = this.currPose[o + 1];
+      const z = this.currPose[o + 2];
+      if (
+        Math.abs(x) > CHUCKER_WIDTH / 2 + 0.8 ||
+        Math.abs(z - CHUCKER_Z) > CHUCKER_DEPTH / 2 + 0.8 ||
+        y < CHUCKER_Y - 0.35 ||
+        y > CHUCKER_Y + 0.8
+      )
+        continue;
+      const vo = i * 3;
+      const speed = Math.hypot(this.vel[vo], this.vel[vo + 1], this.vel[vo + 2]);
+      if (speed > 0.3) continue; // 落ちている途中のメダルは触らない
+      const body = this.medals[i];
+      // 外側へ押しつつ少し回して、枠から滑り落とす
+      const sx = x === 0 ? (Math.random() < 0.5 ? -1 : 1) : Math.sign(x);
+      body.applyImpulse({ x: sx * 0.6 * this.params.medalMass, y: 0, z: (Math.random() - 0.5) * 0.6 }, true);
+      body.applyTorqueImpulse({ x: (Math.random() - 0.5) * 0.3, y: 0, z: sx * 0.15 }, true);
+    }
   }
 
   // ---------------------------------------------------------------- サイコロボール
