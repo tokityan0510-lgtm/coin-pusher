@@ -63,24 +63,26 @@ body {
   left: 0;
   right: 0;
   bottom: 0;
-  padding: 10px 14px calc(10px + env(safe-area-inset-bottom, 0px));
+  padding: 6px 12px calc(8px + env(safe-area-inset-bottom, 0px));
   display: grid;
   grid-template-columns: auto 1fr auto;
-  grid-template-rows: auto auto;
+  grid-template-areas:
+    'cards cards cards'
+    'credit . mute';
   align-items: center;
   column-gap: 12px;
-  row-gap: 4px;
+  row-gap: 6px;
   pointer-events: none;
-  background: linear-gradient(to top, rgba(10, 6, 24, 0.95), rgba(10, 6, 24, 0.6) 70%, rgba(10, 6, 24, 0));
+  background: linear-gradient(to top, rgba(10, 6, 24, 0.9), rgba(10, 6, 24, 0.5) 75%, rgba(10, 6, 24, 0));
 }
 
 .credits {
   position: relative;
-  grid-row: 1 / span 2;
+  grid-area: credit;
   display: flex;
   align-items: baseline;
   gap: 8px;
-  padding: 6px 16px;
+  padding: 3px 14px;
   border-radius: 10px;
   background: #000;
   border: 2px solid #b8892a;
@@ -108,7 +110,7 @@ body {
   display: inline-block;
   min-width: 3ch;
   text-align: right;
-  font-size: 30px;
+  font-size: 26px;
   font-weight: 800;
   color: #ffe9a8;
   text-shadow: 0 0 8px rgba(255, 170, 40, 0.8);
@@ -144,20 +146,70 @@ body {
   }
 }
 
-#session {
-  grid-column: 2;
-  grid-row: 1 / span 2;
+/* カード（すごろくで手に入れたアイテム）。タップで使う */
+#cards {
+  grid-area: cards;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.card {
+  pointer-events: auto;
+  min-height: 38px;
+  padding: 2px 6px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  background: linear-gradient(#2a3a7a, #141d45);
+  color: #fff;
+  font: inherit;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  line-height: 1.2;
+}
+
+.card b {
+  font-size: 14px;
+}
+
+.card small {
+  font-size: 9px;
+  opacity: 0.8;
+}
+
+.card.turbo {
+  background: linear-gradient(#2e7bd6, #123a7a);
+}
+
+.card.shower {
+  background: linear-gradient(#c08a10, #6a4300);
+}
+
+.card.ball {
+  background: linear-gradient(#d4102f, #6a0010);
+}
+
+.card.warp {
+  background: linear-gradient(#9b3bff, #3a0a80);
+  box-shadow: 0 0 10px rgba(180, 100, 255, 0.7);
+}
+
+.card.empty {
+  opacity: 0.25;
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.6);
-  line-height: 1.5;
+}
+
+.card.flash {
+  animation: flash 0.4s ease-out 2;
 }
 
 #mute {
-  grid-column: 3;
-  grid-row: 1 / span 2;
+  grid-area: mute;
   pointer-events: auto;
-  width: 44px;
-  height: 44px;
+  width: 40px;
+  height: 40px;
   border-radius: 50%;
   border: 1px solid rgba(255, 255, 255, 0.25);
   background: rgba(0, 0, 0, 0.5);

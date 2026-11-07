@@ -173,7 +173,7 @@ export class Sound {
     }
   }
 
-  /** JPボールが出てきた */
+  /** サイコロボールが出てきた */
   ballGet(): void {
     const ctx = this.ready();
     if (!ctx) return;
@@ -182,7 +182,7 @@ export class Sound {
     this.tone(t + 0.4, 'triangle', 330, 165, 0.12, 0.4);
   }
 
-  /** JPボールが手前に落ちた（重い落下音＋上昇音） */
+  /** サイコロボールが手前に落ちた（重い落下音＋上昇音） */
   ballDrop(): void {
     const ctx = this.ready();
     if (!ctx) return;
@@ -190,6 +190,62 @@ export class Sound {
     this.tone(t, 'sine', 160, 60, 0.25, 0.35);
     this.noiseHit(t, 800, 0.25, 0.2);
     for (let i = 0; i < 8; i++) this.tone(t + 0.25 + i * 0.06, 'square', 523 * Math.pow(2, i / 6), 523 * Math.pow(2, i / 6), 0.06, 0.08);
+  }
+
+  /** サイコロが転がる */
+  diceRoll(): void {
+    const ctx = this.ready();
+    if (!ctx) return;
+    const t = ctx.currentTime;
+    for (let i = 0; i < 12; i++) this.noiseHit(t + i * 0.1 + Math.random() * 0.03, 1800 + Math.random() * 1500, 0.15, 0.03);
+  }
+
+  diceStop(): void {
+    const ctx = this.ready();
+    if (!ctx) return;
+    const t = ctx.currentTime;
+    this.noiseHit(t, 1500, 0.3, 0.06);
+    this.tone(t + 0.05, 'square', 880, 880, 0.07, 0.1);
+    this.tone(t + 0.15, 'square', 1320, 1320, 0.07, 0.14);
+  }
+
+  /** ロケットが1マス進む */
+  step(): void {
+    const ctx = this.ready();
+    if (!ctx) return;
+    this.tone(ctx.currentTime, 'triangle', 660, 990, 0.08, 0.08);
+  }
+
+  baseGet(): void {
+    const ctx = this.ready();
+    if (!ctx) return;
+    const t = ctx.currentTime;
+    [523, 659, 784, 1046, 1318].forEach((f, i) => this.tone(t + i * 0.08, 'square', f, f, 0.07, 0.18));
+  }
+
+  cardGet(): void {
+    const ctx = this.ready();
+    if (!ctx) return;
+    const t = ctx.currentTime;
+    for (let i = 0; i < 6; i++) this.tone(t + i * 0.05, 'sine', 1500 + i * 250, 1600 + i * 250, 0.07, 0.12);
+  }
+
+  cardUse(): void {
+    const ctx = this.ready();
+    if (!ctx) return;
+    const t = ctx.currentTime;
+    this.tone(t, 'sawtooth', 300, 1200, 0.06, 0.25);
+    this.tone(t + 0.2, 'square', 1568, 1568, 0.06, 0.15);
+  }
+
+  /** 目的地に到着 */
+  goal(): void {
+    const ctx = this.ready();
+    if (!ctx) return;
+    const t = ctx.currentTime;
+    const seq = [784, 784, 784, 1046, 988, 1046, 1318];
+    seq.forEach((f, i) => this.tone(t + i * 0.12, 'square', f, f, 0.08, i === seq.length - 1 ? 0.6 : 0.1));
+    seq.forEach((f, i) => this.tone(t + i * 0.12, 'triangle', f / 2, f / 2, 0.1, 0.1));
   }
 
   rouletteTick(): void {

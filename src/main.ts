@@ -16,9 +16,12 @@ import {
   INITIAL_MEDALS,
   JACKPOT_BASE,
   JACKPOT_STORAGE_KEY,
+  MAX_CARDS,
   MAX_STEPS_PER_FRAME,
   PUSHER_FRONT_RETRACTED,
   REFILL_CREDITS,
+  SHOWER_CARD_MEDALS,
+  CARD_INFO,
   type PhysicsParams,
 } from './config';
 import { Sound } from './audio';
@@ -28,6 +31,7 @@ import { Payout } from './payout';
 import { Machine } from './physics';
 import { GameScene, type LightMode } from './scene';
 import { SlotMachine } from './slot';
+import { Sugoroku } from './sugoroku';
 import { CreditStore } from './storage';
 
 /** 画面の上からこの割合までをタップすると投入 */
@@ -45,7 +49,7 @@ async function main(): Promise<void> {
   const canvas = $<HTMLCanvasElement>('game');
   const creditEl = $('credits');
   const creditBox = $('credit-box');
-  const sessionEl = $('session');
+  const cardsEl = $('cards');
   const refillBtn = $<HTMLButtonElement>('refill');
   const muteBtn = $<HTMLButtonElement>('mute');
   const dropZone = $('drop-zone');
@@ -76,16 +80,16 @@ async function main(): Promise<void> {
       },
       miss: () => sound.miss(),
       ballGet: () => {
-        // ★がそろったら JPボールを盤面に出す。入賞口の枠より下、左右どちらかから
-        const side = Math.random() < 0.5 ? -1 : 1;
-        const x = side * (1.3 + Math.random() * (FLOOR_X - 2.2));
-        const ok = machine.spawnBall(x, CHUCKER_Y - CHUCKER_BAR_HEIGHT / 2 - BALL_RADIUS - 0.05, DROP_Z);
-        if (ok) {
+        if (spawnDiceBall()) {
           sound.ballGet();
           lcd.flash(1.2);
-          showBanner('BALL GET!\n手前に落とせば JPチャンス', 'ball');
+          showBanner('BALL GET!\n手前に落とせばサイコロ', 'ball');
+          return true;
         }
-        return ok;
+        // 盤面のボールが最大数なら、その場でサイコロを振る
+        board.addRoll();
+        showBanner('DICE!', 'win');
+        return false;
       },
       jackpotChance: () => {
         sound.jackpotChance();
@@ -115,15 +119,78 @@ async function main(): Promise<void> {
     loadJackpot(),
   );
 
+  /** サイコロボールを入賞口の枠より下、左右どちらかに出す */
+  function spawnDiceBall(): boolean {
+    const side = Math.random() < 0.5 ? -1 : 1;
+    const x = side * (1.3 + Math.random() * (FLOOR_X - 2.2));
+    return machine.spawnBall(x, CHUCKER_Y - CHUCKER_BAR_HEIGHT / 2 - BALL_RADIUS - 0.05, DROP_Z);
+  }
+
+  // ---- すごろく ----
+  const board = new Sugoroku({
+    rollStart: () => sound.diceRoll(),
+    rollEnd: () => sound.diceStop(),
+    step: () => sound.step(),
+    medal: (n) => {
+      payout.add(n);
+      sound.slotWin(false);
+    },
+    baseGet: () => {
+      sound.baseGet();
+      lcd.flash(1.2);
+    },
+    baseIncome: (n) => {
+      payout.add(n);
+      sound.slotWin(false);
+    },
+    cardGet: () => {
+      sound.cardGet();
+      updateCards();
+    },
+    goal: (n, sq) => {
+      payout.add(n);
+      sound.goal();
+      lcd.flash(2.5);
+      showBanner(`目的地 ${sq.name}\n到着！ +${n}`, 'ball');
+      slot.addJackpotChance();
+    },
+    shower: () => payout.add(SHOWER_CARD_MEDALS, true),
+    summonBall: () => spawnDiceBall(),
+  });
+
   // ---- HUD ----
   const session = { won: 0, lost: 0, chucker: 0 };
+  function updateCards(): void {
+    cardsEl.replaceChildren(
+      ...Array.from({ length: MAX_CARDS }, (_, i) => {
+        const card = board.cards[i];
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = card ? `card ${card}` : 'card empty';
+        btn.disabled = !card;
+        if (card) {
+          btn.innerHTML = `<b>${CARD_INFO[card].name}</b><small>${CARD_INFO[card].desc}</small>`;
+          btn.addEventListener('pointerdown', (e) => e.stopPropagation());
+          btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (board.useCard(i)) {
+              sound.cardUse();
+              updateCards();
+            } else {
+              flash(btn);
+            }
+          });
+        } else {
+          btn.textContent = 'カード';
+        }
+        return btn;
+      }),
+    );
+  }
+  updateCards();
   let shownCredits = store.credits;
   let countAcc = 0;
   creditEl.textContent = String(shownCredits);
-  const updateSession = () => {
-    sessionEl.textContent = `獲得 ${session.won}　没収 ${session.lost}　入賞 ${session.chucker}`;
-  };
-  updateSession();
   const updateRefill = () => {
     refillBtn.hidden = store.credits > 0;
   };
@@ -196,7 +263,7 @@ async function main(): Promise<void> {
   });
 
   // ---- 調整パネル ----
-  const stats: DebugStats = { fps: 0, medals: 0, awake: 0, stepMs: 0 };
+  const stats: DebugStats = { fps: 0, medals: 0, awake: 0, stepMs: 0, won: 0, lost: 0, chucker: 0 };
   if (debug) {
     createDebugPanel({
       params,
@@ -233,7 +300,16 @@ async function main(): Promise<void> {
       },
       onShadows: (on) => scene.setShadows(on),
       onSpawnBall: () => {
-        if (!slot.events.ballGet()) showBanner('ボールは最大数です', 'win');
+        if (!spawnDiceBall()) showBanner('ボールは最大数です', 'win');
+      },
+      onRoll: () => board.addRoll(),
+      onCard: (card) => {
+        board.debugCard(card);
+        updateCards();
+      },
+      onBoardReset: () => {
+        board.reset();
+        updateCards();
       },
     });
   }
@@ -308,24 +384,27 @@ async function main(): Promise<void> {
       scene.flashChucker();
     }
     for (let i = 0; i < ballWon; i++) {
-      slot.addJackpotChance();
+      board.addRoll();
       sound.ballDrop();
       scene.flashFront();
-      showBanner('BALL IN!!\nJACKPOT CHANCE', 'chance');
+      showBanner('DICE ROLL!', 'chance');
     }
     if (ballLost > 0) {
       sound.lost();
       showBanner('BALL LOST…', 'lost');
     }
     if (impacts > 0) sound.clink(impactMax / 14, impactPan);
-    if (won || lost || chucker) updateSession();
     winSoundCooldown -= dt;
 
     // ---- スロット・払い出し・演出 ----
-    slot.update(dt);
+    // ジャックポットチャンスとすごろくは液晶の中央を使うので、交互に進める
+    const chanceActive =
+      slot.pendingChance > 0 || slot.mode === 'chance' || slot.mode === 'roulette' || slot.mode === 'rouletteResult';
+    slot.update(dt, board.busy);
+    board.update(dt, chanceActive);
     payout.update(dt);
-    lcd.update(slot, dt);
-    scene.setLightMode(lightModeFor(slot, payout));
+    lcd.update(slot, board, dt);
+    scene.setLightMode(lightModeFor(slot, payout, board));
 
     // 所持メダルはカウントアップで見せる（減るときは即時）
     if (shownCredits !== store.credits) {
@@ -357,6 +436,9 @@ async function main(): Promise<void> {
       stats.medals = machine.count;
       stats.awake = debug ? machine.medals.reduce((a, b) => a + (b.isSleeping() ? 0 : 1), 0) : 0;
       stats.stepMs = stepCount > 0 ? stepMsSum / stepCount : 0;
+      stats.won = session.won;
+      stats.lost = session.lost;
+      stats.chucker = session.chucker;
       fpsFrames = 0;
       fpsTime = 0;
       stepMsSum = 0;
@@ -372,9 +454,10 @@ async function main(): Promise<void> {
   document.getElementById('loading')?.remove();
 }
 
-function lightModeFor(slot: SlotMachine, payout: Payout): LightMode {
+function lightModeFor(slot: SlotMachine, payout: Payout, board: Sugoroku): LightMode {
   if (payout.jackpotActive || (slot.mode === 'rouletteResult' && slot.lastRoulette?.jackpot)) return 'jackpot';
-  if (slot.mode === 'chance' || slot.mode === 'roulette') return 'chance';
+  if (slot.mode === 'chance' || slot.mode === 'roulette' || board.mode === 'goal') return 'chance';
+  if (board.mode === 'roll' || board.mode === 'move') return 'spin';
   if (payout.active || (slot.mode === 'result' && slot.lastWin) || slot.mode === 'rouletteResult') return 'win';
   if (slot.mode === 'spin') return 'spin';
   return 'idle';

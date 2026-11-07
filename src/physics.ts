@@ -57,7 +57,7 @@ export interface StepResult {
   lost: number;
   /** 入賞口を通り抜けた */
   chucker: number;
-  /** JPボールが手前から落ちた / 溝などに落ちた */
+  /** サイコロボールが手前から落ちた / 溝などに落ちた */
   ballWon: number;
   ballLost: number;
   /** このステップで起きた衝突の数と最大の強さ（効果音用。速度変化量 ユニット/秒） */
@@ -157,7 +157,7 @@ export class Machine {
   /** 直近 world.step() にかかった時間（ms） */
   lastStepMs = 0;
 
-  /** JPボール（index = 描画用メッシュの番号）と、その前ステップ・現ステップの姿勢 */
+  /** サイコロボール（index = 描画用メッシュの番号）と、その前ステップ・現ステップの姿勢 */
   readonly balls: RAPIER.RigidBody[] = [];
   readonly ballPrev = new Float32Array(MAX_BALLS * POSE_STRIDE);
   readonly ballCurr = new Float32Array(MAX_BALLS * POSE_STRIDE);
@@ -346,7 +346,7 @@ export class Machine {
     return result;
   }
 
-  // ---------------------------------------------------------------- JPボール
+  // ---------------------------------------------------------------- サイコロボール
 
   /** ボールを出す。上限なら false */
   spawnBall(x: number, y: number, z: number): boolean {
