@@ -65,10 +65,10 @@ body {
   bottom: 0;
   padding: 6px 12px calc(8px + env(safe-area-inset-bottom, 0px));
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: auto 1fr auto auto;
   grid-template-areas:
-    'cards cards cards'
-    'credit . mute';
+    'cards cards cards cards'
+    'credit . autofire mute';
   align-items: center;
   column-gap: 12px;
   row-gap: 6px;
@@ -203,6 +203,52 @@ body {
 
 .card.flash {
   animation: flash 0.4s ease-out 2;
+}
+
+/* オート投入ボタン（オンで光る） */
+#auto {
+  grid-area: autofire;
+  pointer-events: auto;
+  height: 40px;
+  padding: 0 14px;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 211, 107, 0.6);
+  background: rgba(0, 0, 0, 0.5);
+  color: #ffd36b;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+#auto.on {
+  background: linear-gradient(#ffcf3a, #e08a00);
+  color: #2a1400;
+  border-color: #fff3c0;
+  box-shadow: 0 0 14px rgba(255, 190, 40, 0.9);
+  animation: auto-pulse 0.9s ease-in-out infinite;
+}
+
+@keyframes auto-pulse {
+  50% {
+    box-shadow: 0 0 4px rgba(255, 190, 40, 0.5);
+  }
+}
+
+/* オート中の狙いの位置 */
+#aim {
+  position: absolute;
+  bottom: -2px;
+  transform: translateX(-50%);
+  font-size: 18px;
+  color: #ffd36b;
+  text-shadow: 0 0 6px #ff9a00, 0 1px 2px #000;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+#aim.show {
+  opacity: 1;
 }
 
 #mute {

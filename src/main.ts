@@ -2,6 +2,7 @@ import RAPIER from '@dimforge/rapier3d-compat';
 import './style.css';
 import {
   DEFAULT_PARAMS,
+  AUTO_FIRE_INTERVAL,
   BALL_RADIUS,
   CHUCKER_BAR_HEIGHT,
   CHUCKER_Y,
@@ -52,6 +53,8 @@ async function main(): Promise<void> {
   const cardsEl = $('cards');
   const refillBtn = $<HTMLButtonElement>('refill');
   const muteBtn = $<HTMLButtonElement>('mute');
+  const autoBtn = $<HTMLButtonElement>('auto');
+  const aimEl = $('aim');
   const dropZone = $('drop-zone');
   const banner = $('banner');
   const popups = $('popups');
@@ -235,18 +238,19 @@ async function main(): Promise<void> {
   // ---- 入力：画面上部タップでその横位置から投入 ----
   let lastDrop = -Infinity;
   let drops = 0;
-  // 音はユーザー操作の中でしか開始できないので、最初の操作で有効にする
-  window.addEventListener('pointerdown', () => sound.unlock(), { capture: true });
-  canvas.addEventListener('pointerdown', (e) => {
-    if (e.clientY > window.innerHeight * DROP_ZONE_RATIO) return;
-    const now = performance.now() / 1000;
-    if (now - lastDrop < DROP_COOLDOWN) return;
+  /** 狙う位置（画面幅に対する割合）。オート投入はここを狙い続ける。最初は中央（入賞口） */
+  let aimRatio = 0.5;
+  let autoOn = false;
+  let autoAcc = 0;
+
+  /** 1枚投入する。所持メダルが無ければ false */
+  function dropMedal(): boolean {
     if (!store.spend()) {
       flash(refillBtn);
-      return;
+      return false;
     }
-    lastDrop = now;
-    const x = clamp(scene.screenXToDropX(e.clientX) + (Math.random() * 2 - 1) * DROP_SCATTER, -DROP_X_MAX, DROP_X_MAX);
+    const aimX = scene.screenXToDropX(aimRatio * window.innerWidth);
+    const x = clamp(aimX + (Math.random() * 2 - 1) * DROP_SCATTER, -DROP_X_MAX, DROP_X_MAX);
     // ほぼ水平、少しだけ傾けて落とす（完全に平らだと着地が不自然に揃う）
     const tilt = (Math.random() - 0.5) * 0.25;
     const half = tilt / 2;
@@ -260,6 +264,44 @@ async function main(): Promise<void> {
     shownCredits = Math.min(shownCredits, store.credits);
     creditEl.textContent = String(shownCredits);
     updateRefill();
+    return true;
+  }
+
+  function setAim(clientX: number): void {
+    aimRatio = clamp(clientX / window.innerWidth, 0, 1);
+    aimEl.style.left = `${aimRatio * 100}%`;
+  }
+
+  function setAuto(on: boolean): void {
+    autoOn = on;
+    autoAcc = AUTO_FIRE_INTERVAL; // オンにしたらすぐ1枚目を出す
+    autoBtn.classList.toggle('on', on);
+    autoBtn.setAttribute('aria-pressed', String(on));
+    aimEl.classList.toggle('show', on);
+  }
+  setAim(window.innerWidth / 2);
+
+  // 音はユーザー操作の中でしか開始できないので、最初の操作で有効にする
+  window.addEventListener('pointerdown', () => sound.unlock(), { capture: true });
+  canvas.addEventListener('pointerdown', (e) => {
+    if (e.clientY > window.innerHeight * DROP_ZONE_RATIO) return;
+    setAim(e.clientX);
+    // オート中のタップは狙いの変更だけ
+    if (autoOn) return;
+    const now = performance.now() / 1000;
+    if (now - lastDrop < DROP_COOLDOWN) return;
+    lastDrop = now;
+    dropMedal();
+  });
+  // オート中は、上部をなぞると狙いが動く
+  canvas.addEventListener('pointermove', (e) => {
+    if (autoOn && e.buttons && e.clientY <= window.innerHeight * DROP_ZONE_RATIO) setAim(e.clientX);
+  });
+  autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
+  autoBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    sound.unlock();
+    setAuto(!autoOn);
   });
 
   // ---- 調整パネル ----
@@ -395,6 +437,15 @@ async function main(): Promise<void> {
     }
     if (impacts > 0) sound.clink(impactMax / 14, impactPan);
     winSoundCooldown -= dt;
+
+    // ---- オート投入 ----
+    if (autoOn) {
+      autoAcc += dt;
+      while (autoOn && autoAcc >= AUTO_FIRE_INTERVAL) {
+        autoAcc -= AUTO_FIRE_INTERVAL;
+        if (!dropMedal()) setAuto(false); // メダルが無くなったら止める
+      }
+    }
 
     // ---- スロット・払い出し・演出 ----
     // ジャックポットチャンスとすごろくは液晶の中央を使うので、交互に進める
