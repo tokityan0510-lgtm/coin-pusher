@@ -32,6 +32,7 @@ import {
   CHUCKER_WIDTH,
   CHUCKER_Y,
   CHUCKER_Z,
+  GUTTER_LIP_Y,
   GUTTER_WIDTH,
   WALL_HEIGHT,
   WALL_THICKNESS,
@@ -69,7 +70,7 @@ export interface StepResult {
 
 /** 静的な盤面パーツ（描画側でも同じ寸法を使う） */
 export interface BoxPart {
-  name: 'floor' | 'side' | 'wall' | 'curtain' | 'back' | 'chucker' | 'lid';
+  name: 'floor' | 'side' | 'wall' | 'lip' | 'curtain' | 'back' | 'chucker' | 'lid';
   half: [number, number, number];
   pos: [number, number, number];
 }
@@ -95,6 +96,14 @@ export function boardParts(): BoxPart[] {
         name: 'side',
         half: [GUTTER_WIDTH / 2, (CURTAIN_TOP + floorT) / 2, sideLen / 2],
         pos: [s * (FLOOR_X + GUTTER_WIDTH / 2), (CURTAIN_TOP - floorT) / 2, BACK_Z + sideLen / 2],
+      }),
+    ),
+    // 溝の上のカバー（壁から張り出した手すり）。上から溝が見えないようにし、ボールが溝に寄りすぎないようにする
+    ...sides.map(
+      (s): BoxPart => ({
+        name: 'lip',
+        half: [GUTTER_WIDTH / 2, 0.06, (FRONT_Z - GUTTER_START_Z) / 2],
+        pos: [s * (FLOOR_X + GUTTER_WIDTH / 2), GUTTER_LIP_Y + 0.06, (FRONT_Z + GUTTER_START_Z) / 2],
       }),
     ),
     // 外壁
