@@ -78,8 +78,13 @@ export const DROP_SOFT_CCD = 0.4;
 //
 /** 床（＝プッシャー）の半幅 */
 export const FLOOR_X = 3.6;
-/** 左右の溝の幅。メダル直径より広くないと落ちない */
-export const GUTTER_WIDTH = 1.2;
+/**
+ * 左右の溝（壁ぎわのすき間）の幅。実機と同じく細いすき間にする。
+ * メダル（直径1・厚さ0.2）は縁から傾いて縦になって落ちるが、ボール（直径1.4）は通れない。
+ */
+export const GUTTER_WIDTH = 0.8;
+/** 溝の上にかぶせる手すり状のカバーの高さ（下端）。メダル3枚重ねまでは下をくぐって溝に落ちる */
+export const GUTTER_LIP_Y = 0.6;
 /** 外壁の内側 x */
 export const WALL_X = FLOOR_X + GUTTER_WIDTH;
 export const WALL_THICKNESS = 0.4;

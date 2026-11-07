@@ -42,11 +42,11 @@ import {
 const CAMERA_ELEVATION_DEG = 58;
 /** 注視点（筐体ローカル空間） */
 const LOOK_AT = new THREE.Vector3(0, 1.2, -4.0);
-/** 画面に収めたい横幅（壁の外側） */
-const FIT_WIDTH = (WALL_X + WALL_THICKNESS) * 2;
 
 /** 液晶パネル：仕切り板の上に、奥へ倒して載せる（見下ろす視点から読みやすいように） */
 const LCD_W = 8.6;
+/** 画面に収めたい横幅。いちばん幅の広い液晶パネルが収まるようにする */
+const FIT_WIDTH = LCD_W + 1.8;
 const LCD_H = (LCD_W * LCD_PX_H) / LCD_PX_W;
 const LCD_LEAN_DEG = 30;
 
@@ -427,6 +427,8 @@ export class GameScene {
       curtain: new THREE.MeshStandardMaterial({ color: 0x1c1430, metalness: 0.6, roughness: 0.35 }),
       back: new THREE.MeshStandardMaterial({ color: 0x0c0a14, metalness: 0.2, roughness: 0.7 }),
       chucker: this.chuckerMat,
+      // 溝の上のカバー：クロームの手すり
+      lip: new THREE.MeshStandardMaterial({ color: 0xd8dce8, metalness: 1, roughness: 0.18 }),
     };
     for (const part of boardParts()) {
       if (part.name === 'lid') continue; // 見えないふた
@@ -454,13 +456,13 @@ export class GameScene {
       this.cabinet.add(rail);
     }
 
-    // 左右の溝（没収エリア）
-    const gutterMat = new THREE.MeshBasicMaterial({ color: 0x2a0610 });
+    // 左右の溝の底（真っ暗にして、のぞき込んでも穴が目立たないように）
+    const gutterMat = new THREE.MeshBasicMaterial({ color: 0x020104 });
     const gutterW = WALL_X - FLOOR_X;
     const gutterLen = FRONT_Z - GUTTER_START_Z;
     for (const s of [-1, 1]) {
       const g = new THREE.Mesh(new THREE.BoxGeometry(gutterW, 0.05, gutterLen), gutterMat);
-      g.position.set(s * (FLOOR_X + gutterW / 2), -0.9, GUTTER_START_Z + gutterLen / 2);
+      g.position.set(s * (FLOOR_X + gutterW / 2), -0.6, GUTTER_START_Z + gutterLen / 2);
       this.cabinet.add(g);
     }
 
