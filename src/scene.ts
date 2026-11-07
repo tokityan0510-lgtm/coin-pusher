@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import {
   BACK_Z,
+  BALL_RADIUS,
+  MAX_BALLS,
   CURTAIN_FRONT_Z,
   DROP_X_MAX,
   DROP_Y,
@@ -12,8 +14,11 @@ import {
   MAX_MEDALS,
   MEDAL_RADIUS,
   MEDAL_THICKNESS,
-  POCKET_HEIGHT,
-  POCKET_WIDTH,
+  CHUCKER_BAR,
+  CHUCKER_DEPTH,
+  CHUCKER_WIDTH,
+  CHUCKER_Y,
+  CHUCKER_Z,
   PUSHER_HEIGHT,
   PUSHER_LENGTH,
   PUSHER_SIDE_GAP,
@@ -24,6 +29,7 @@ import {
 import type { Lcd } from './lcd';
 import { boardParts, CURTAIN_TOP, POSE_STRIDE, type Machine } from './physics';
 import {
+  ballTexture,
   brushedMetalTexture,
   chanceSignTexture,
   floorTexture,
@@ -55,10 +61,11 @@ export class GameScene {
   readonly cabinet = new THREE.Group();
 
   private readonly medalMesh: THREE.InstancedMesh;
+  private readonly ballMeshes: THREE.Mesh[] = [];
   private readonly pusherMesh: THREE.Mesh;
   private readonly keyLight: THREE.DirectionalLight;
   private readonly frontStrip: THREE.MeshBasicMaterial;
-  private readonly pocketFrame: THREE.MeshBasicMaterial;
+  private readonly chuckerMat: THREE.MeshStandardMaterial;
   private readonly bulbs: THREE.InstancedMesh;
   private readonly glow: THREE.Points;
   private readonly bulbGroup: number[] = [];
@@ -67,7 +74,7 @@ export class GameScene {
   private lightModeTime = 0;
   private time = 0;
   private frontFlash = 0;
-  private pocketFlash = 0;
+  private chuckerFlash = 0;
 
   private readonly tmpPos = new THREE.Vector3();
   private readonly tmpQuat = new THREE.Quaternion();
@@ -110,6 +117,14 @@ export class GameScene {
     this.scene.add(this.keyLight, this.keyLight.target);
 
     this.scene.add(this.cabinet);
+    // 入賞口の枠（通ると光る）
+    this.chuckerMat = new THREE.MeshStandardMaterial({
+      color: 0xd0103a,
+      metalness: 0.4,
+      roughness: 0.3,
+      emissive: 0xff2050,
+      emissiveIntensity: 0.6,
+    });
     this.buildBoard();
 
     // 前面の発光ライン（獲得時に光る）
@@ -118,9 +133,7 @@ export class GameScene {
     strip.position.set(0, -0.06, FRONT_Z + 0.06);
     this.cabinet.add(strip);
 
-    // 入賞口の枠（入ると光る）
-    this.pocketFrame = new THREE.MeshBasicMaterial({ color: 0xff3d6e });
-    this.buildPocket();
+    this.buildChuckerSign();
 
     // 液晶
     this.buildLcd(lcd);
@@ -174,6 +187,22 @@ export class GameScene {
     // 全メダルが常に盤面付近にあるので、インスタンス単位の視錐台カリングは不要
     this.medalMesh.frustumCulled = false;
     this.cabinet.add(this.medalMesh);
+
+    // JPボール（最大 MAX_BALLS 個。使わないものは隠す）
+    const ballGeo = new THREE.SphereGeometry(BALL_RADIUS, 32, 20);
+    const ballMat = new THREE.MeshStandardMaterial({
+      map: ballTexture(),
+      metalness: 0.25,
+      roughness: 0.18,
+      emissive: 0x300008,
+    });
+    for (let i = 0; i < MAX_BALLS; i++) {
+      const m = new THREE.Mesh(ballGeo, ballMat);
+      m.castShadow = true;
+      m.visible = false;
+      this.ballMeshes.push(m);
+      this.cabinet.add(m);
+    }
 
     // 電飾（電球の玉＋加算合成の光のにじみ）
     const positions = this.bulbPositions();
@@ -236,8 +265,8 @@ export class GameScene {
   }
 
   /** 入賞口の枠を光らせる */
-  flashPocket(): void {
-    this.pocketFlash = 1;
+  flashChucker(): void {
+    this.chuckerFlash = 1;
   }
 
   resize(): void {
@@ -301,6 +330,24 @@ export class GameScene {
     this.medalMesh.count = n;
     this.medalMesh.instanceMatrix.needsUpdate = true;
 
+    // JPボール
+    const bp = machine.ballPrev;
+    const bc = machine.ballCurr;
+    for (let i = 0; i < this.ballMeshes.length; i++) {
+      const mesh = this.ballMeshes[i];
+      mesh.visible = i < machine.ballCount;
+      if (!mesh.visible) continue;
+      const o = i * POSE_STRIDE;
+      mesh.position.set(
+        bp[o] + (bc[o] - bp[o]) * alpha,
+        bp[o + 1] + (bc[o + 1] - bp[o + 1]) * alpha,
+        bp[o + 2] + (bc[o + 2] - bp[o + 2]) * alpha,
+      );
+      q.set(bp[o + 3], bp[o + 4], bp[o + 5], bp[o + 6]);
+      qb.set(bc[o + 3], bc[o + 4], bc[o + 5], bc[o + 6]);
+      mesh.quaternion.copy(q.slerp(qb, alpha));
+    }
+
     this.updateLights(dt);
     this.renderer.render(this.scene, this.camera);
   }
@@ -309,11 +356,12 @@ export class GameScene {
 
   private updateLights(dt: number): void {
     this.frontFlash = Math.max(0, this.frontFlash - dt * 2.5);
-    this.pocketFlash = Math.max(0, this.pocketFlash - dt * 2);
+    this.chuckerFlash = Math.max(0, this.chuckerFlash - dt * 2);
     const ff = this.frontFlash;
     this.frontStrip.color.setRGB(1, 0.55 + ff * 0.45, 0.1 + ff * 0.9).multiplyScalar(0.6 + ff * 1.4);
-    const pf = this.pocketFlash;
-    this.pocketFrame.color.setRGB(1, 0.24 + pf * 0.76, 0.43 + pf * 0.57).multiplyScalar(0.7 + pf * 1.3);
+    const cf = this.chuckerFlash;
+    this.chuckerMat.emissive.setRGB(1, 0.13 + cf * 0.87, 0.31 + cf * 0.69);
+    this.chuckerMat.emissiveIntensity = 0.6 + cf * 1.6;
 
     const t = this.time;
     const mode = this.lightMode;
@@ -327,7 +375,8 @@ export class GameScene {
         case 'idle':
           // ゆっくり流れる
           on = (i + Math.floor(t * 6)) % 4 === 0 ? 1 : 0.18;
-          c.setHSL(group === 0 ? 0.12 : group === 1 ? 0.95 : 0.58, 1, 0.55);
+          c.setHSL(group === 0 ? 0.12 : group === 1 ? 0.58 : 0.95, 1, 0.55);
+          if (group === 2) on = Math.max(on, 0.6); // 入賞口はいつも目立たせる
           break;
         case 'spin':
           on = (i + Math.floor(t * 18)) % 3 === 0 ? 1 : 0.25;
@@ -378,7 +427,7 @@ export class GameScene {
       }),
       curtain: new THREE.MeshStandardMaterial({ color: 0x1c1430, metalness: 0.6, roughness: 0.35 }),
       back: new THREE.MeshStandardMaterial({ color: 0x0c0a14, metalness: 0.2, roughness: 0.7 }),
-      pocket: new THREE.MeshBasicMaterial({ color: 0x050308 }),
+      chucker: this.chuckerMat,
     };
     for (const part of boardParts()) {
       if (part.name === 'lid') continue; // 見えないふた
@@ -423,28 +472,14 @@ export class GameScene {
     this.cabinet.add(tray);
   }
 
-  private buildPocket(): void {
-    const z = CURTAIN_FRONT_Z + 0.02;
-    const w = POCKET_WIDTH;
-    const top = PUSHER_HEIGHT + POCKET_HEIGHT;
-    const t = 0.07;
-    // 口の左右と上の光る枠
-    const bars: [number, number, number, number][] = [
-      [-(w / 2 + t / 2), (PUSHER_HEIGHT + top) / 2 + 0.06, t, top - PUSHER_HEIGHT - 0.12 + t],
-      [w / 2 + t / 2, (PUSHER_HEIGHT + top) / 2 + 0.06, t, top - PUSHER_HEIGHT - 0.12 + t],
-      [0, top + t / 2, w + t * 2, t],
-    ];
-    for (const [x, y, bw, bh] of bars) {
-      const m = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, 0.05), this.pocketFrame);
-      m.position.set(x, y, z);
-      this.cabinet.add(m);
-    }
-    // 看板
+  /** 入賞口の枠の手前に立てる「CHANCE」看板（見た目だけ。当たり判定なし） */
+  private buildChuckerSign(): void {
     const sign = new THREE.Mesh(
       new THREE.PlaneGeometry(2.0, 0.5),
       new THREE.MeshBasicMaterial({ map: chanceSignTexture() }),
     );
-    sign.position.set(0, top + 0.4, z);
+    sign.position.set(0, CHUCKER_Y + 0.36, CHUCKER_Z + CHUCKER_DEPTH / 2 + CHUCKER_BAR + 0.05);
+    sign.rotation.x = -0.35; // 見下ろすカメラの方へ少し倒す
     this.cabinet.add(sign);
   }
 
@@ -499,13 +534,21 @@ export class GameScene {
         this.bulbGroup.push(1);
       }
     }
-    // 2: 入賞口の看板の左右
-    const top = PUSHER_HEIGHT + POCKET_HEIGHT + 0.4;
-    for (const s of [-1, 1]) {
-      for (let k = 0; k < 3; k++) {
-        out.push(new THREE.Vector3(s * (1.2 + k * 0.32), top, CURTAIN_FRONT_Z + 0.06));
-        this.bulbGroup.push(2);
-      }
+    // 2: 入賞口の枠の四隅と各辺の中央
+    const hx = CHUCKER_WIDTH / 2 + CHUCKER_BAR / 2;
+    const hz = CHUCKER_DEPTH / 2 + CHUCKER_BAR / 2;
+    for (const [x, z] of [
+      [-hx, -hz],
+      [0, -hz],
+      [hx, -hz],
+      [hx, 0],
+      [hx, hz],
+      [0, hz],
+      [-hx, hz],
+      [-hx, 0],
+    ]) {
+      out.push(new THREE.Vector3(x, CHUCKER_Y + 0.13, CHUCKER_Z + z));
+      this.bulbGroup.push(2);
     }
     return out;
   }

@@ -119,8 +119,8 @@ export class Sound {
 
   // ---------------------------------------------------------------- 入賞・スロット
 
-  /** 入賞口に入った */
-  pocket(): void {
+  /** 入賞口を通った */
+  chucker(): void {
     const ctx = this.ready();
     if (!ctx) return;
     const t = ctx.currentTime;
@@ -171,6 +171,25 @@ export class Sound {
       const f = 600 + i * 90;
       this.tone(t + i * 0.08, 'sawtooth', f, f * 1.02, 0.05, 0.1);
     }
+  }
+
+  /** JPボールが出てきた */
+  ballGet(): void {
+    const ctx = this.ready();
+    if (!ctx) return;
+    const t = ctx.currentTime;
+    [659, 784, 988, 1319].forEach((f, i) => this.tone(t + i * 0.1, 'square', f, f, 0.08, 0.16));
+    this.tone(t + 0.4, 'triangle', 330, 165, 0.12, 0.4);
+  }
+
+  /** JPボールが手前に落ちた（重い落下音＋上昇音） */
+  ballDrop(): void {
+    const ctx = this.ready();
+    if (!ctx) return;
+    const t = ctx.currentTime;
+    this.tone(t, 'sine', 160, 60, 0.25, 0.35);
+    this.noiseHit(t, 800, 0.25, 0.2);
+    for (let i = 0; i < 8; i++) this.tone(t + 0.25 + i * 0.06, 'square', 523 * Math.pow(2, i / 6), 523 * Math.pow(2, i / 6), 0.06, 0.08);
   }
 
   rouletteTick(): void {

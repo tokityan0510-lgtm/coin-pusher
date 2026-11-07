@@ -38,9 +38,14 @@ body {
 }
 
 #drop-zone span {
+  position: absolute;
+  top: calc(6px + env(safe-area-inset-top, 0px));
+  left: 0;
+  right: 0;
+  text-align: center;
   font-size: 12px;
-  color: rgba(255, 230, 170, 0.65);
-  padding-bottom: 6px;
+  color: rgba(255, 230, 170, 0.75);
+  text-shadow: 0 1px 2px #000;
 }
 
 #drop-zone.hint-off {
@@ -220,6 +225,23 @@ body {
   font-size: 34px;
   color: #ff5c8a;
   text-shadow: 0 0 14px #ff0050, 0 3px 0 #400018;
+}
+
+#banner.ball {
+  font-size: 20px;
+  line-height: 1.15;
+  color: #ffd84a;
+  text-shadow: 0 0 14px #ff8a00, 0 3px 0 #402000;
+}
+
+#banner.ball::first-line {
+  font-size: 44px;
+}
+
+#banner.lost {
+  font-size: 30px;
+  color: #b0b8d0;
+  text-shadow: 0 2px 0 #000;
 }
 
 #banner.jackpot {

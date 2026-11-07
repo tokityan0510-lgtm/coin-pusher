@@ -1,10 +1,12 @@
 import {
+  CHUCKER_BAR_HEIGHT,
+  CHUCKER_Y,
   DROP_X_MAX,
-  DROP_Y,
   DROP_Z,
   FLOOR_X,
   FRONT_Z,
   JACKPOT_PAYOUT_RATE,
+  MEDAL_THICKNESS,
   PAYOUT_MAX_ACTIVE,
   PAYOUT_RATE,
   PUSHER_FRONT_RETRACTED,
@@ -13,7 +15,7 @@ import type { Machine } from './physics';
 
 /**
  * 当たりの払い出し。所持メダルに直接足すのではなく、盤面にメダルを降らせる（ゲーセンの筐体と同じ）。
- * 通常はプッシャーの上へ、ジャックポットは盤面全体へ降らせる。
+ * 通常はプッシャーの上へ（入賞口の枠より下から）、ジャックポットは盤面全体へ降らせる。
  * 盤上の枚数が PAYOUT_MAX_ACTIVE 以上のときは待つ（処理落ち防止）。
  */
 export class Payout {
@@ -55,7 +57,9 @@ export class Payout {
       while (this.normalAcc >= 1 && this.normal > 0 && m.count < PAYOUT_MAX_ACTIVE) {
         this.normalAcc--;
         const x = (Math.random() * 2 - 1) * DROP_X_MAX;
-        if (m.spawnMedal(x, DROP_Y + 0.4, DROP_Z + (Math.random() - 0.5) * 0.8, randomTilt(), true)) this.normal--;
+        // 入賞口の枠より下から出す（払い出しのメダルで入賞しないように）
+        const y = CHUCKER_Y - CHUCKER_BAR_HEIGHT - MEDAL_THICKNESS;
+        if (m.spawnMedal(x, y, DROP_Z + (Math.random() - 0.5) * 0.8, randomTilt(), true)) this.normal--;
       }
       this.normalAcc = Math.min(this.normalAcc, 2);
     }

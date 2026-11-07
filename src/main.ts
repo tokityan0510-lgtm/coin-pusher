@@ -2,7 +2,12 @@ import RAPIER from '@dimforge/rapier3d-compat';
 import './style.css';
 import {
   DEFAULT_PARAMS,
+  BALL_RADIUS,
+  CHUCKER_BAR_HEIGHT,
+  CHUCKER_Y,
   DROP_COOLDOWN,
+  DROP_SCATTER,
+  DROP_X_MAX,
   DROP_Y,
   DROP_Z,
   FIXED_DT,
@@ -70,6 +75,18 @@ async function main(): Promise<void> {
         showBanner(symbol === '7' ? `777  +${n}` : `WIN  +${n}`, symbol === '7' ? 'big' : 'win');
       },
       miss: () => sound.miss(),
+      ballGet: () => {
+        // ★がそろったら JPボールを盤面に出す。入賞口の枠より下、左右どちらかから
+        const side = Math.random() < 0.5 ? -1 : 1;
+        const x = side * (1.3 + Math.random() * (FLOOR_X - 2.2));
+        const ok = machine.spawnBall(x, CHUCKER_Y - CHUCKER_BAR_HEIGHT / 2 - BALL_RADIUS - 0.05, DROP_Z);
+        if (ok) {
+          sound.ballGet();
+          lcd.flash(1.2);
+          showBanner('BALL GET!\n手前に落とせば JPチャンス', 'ball');
+        }
+        return ok;
+      },
       jackpotChance: () => {
         sound.jackpotChance();
         showBanner('JACKPOT CHANCE!!', 'chance');
@@ -99,12 +116,12 @@ async function main(): Promise<void> {
   );
 
   // ---- HUD ----
-  const session = { won: 0, lost: 0, pocket: 0 };
+  const session = { won: 0, lost: 0, chucker: 0 };
   let shownCredits = store.credits;
   let countAcc = 0;
   creditEl.textContent = String(shownCredits);
   const updateSession = () => {
-    sessionEl.textContent = `獲得 ${session.won}　没収 ${session.lost}　入賞 ${session.pocket}`;
+    sessionEl.textContent = `獲得 ${session.won}　没収 ${session.lost}　入賞 ${session.chucker}`;
   };
   updateSession();
   const updateRefill = () => {
@@ -118,7 +135,7 @@ async function main(): Promise<void> {
   updateMute();
 
   let bannerTimer = 0;
-  function showBanner(text: string, kind: 'win' | 'big' | 'chance' | 'jackpot'): void {
+  function showBanner(text: string, kind: 'win' | 'big' | 'chance' | 'jackpot' | 'ball' | 'lost'): void {
     banner.textContent = text;
     banner.className = '';
     void banner.offsetWidth;
@@ -162,12 +179,12 @@ async function main(): Promise<void> {
       return;
     }
     lastDrop = now;
-    const x = scene.screenXToDropX(e.clientX) + (Math.random() - 0.5) * 0.05;
+    const x = clamp(scene.screenXToDropX(e.clientX) + (Math.random() * 2 - 1) * DROP_SCATTER, -DROP_X_MAX, DROP_X_MAX);
     // ほぼ水平、少しだけ傾けて落とす（完全に平らだと着地が不自然に揃う）
     const tilt = (Math.random() - 0.5) * 0.25;
     const half = tilt / 2;
     const rot = { x: Math.sin(half), y: 0, z: 0, w: Math.cos(half) };
-    if (!machine.spawnMedal(x, DROP_Y, DROP_Z + (Math.random() - 0.5) * 0.3, rot, true)) {
+    if (!machine.spawnMedal(x, DROP_Y, DROP_Z + (Math.random() - 0.5) * 0.1, rot, true)) {
       store.add(1); // 上限で出せなかったら返却
     } else {
       sound.insert();
@@ -190,6 +207,7 @@ async function main(): Promise<void> {
       },
       onResetBoard: () => {
         machine.clearMedals();
+        machine.clearBalls();
         machine.fillInitial(INITIAL_MEDALS);
       },
       onAddCredits: (n) => {
@@ -208,12 +226,15 @@ async function main(): Promise<void> {
         }
       },
       onPusherToggle: (running) => machine.setPusherRunning(running),
-      onSlotStock: () => slot.addPocket(),
+      onSlotStock: () => slot.addChucker(),
       onSlotForce: (symbol) => {
         slot.forceNext = symbol;
-        if (slot.stock === 0 && slot.mode === 'idle') slot.addPocket();
+        if (slot.stock === 0 && slot.mode === 'idle') slot.addChucker();
       },
       onShadows: (on) => scene.setShadows(on),
+      onSpawnBall: () => {
+        if (!slot.events.ballGet()) showBanner('ボールは最大数です', 'win');
+      },
     });
   }
 
@@ -236,7 +257,9 @@ async function main(): Promise<void> {
     let steps = 0;
     let won = 0;
     let lost = 0;
-    let pocket = 0;
+    let chucker = 0;
+    let ballWon = 0;
+    let ballLost = 0;
     let impacts = 0;
     let impactMax = 0;
     let impactPan = 0;
@@ -244,7 +267,9 @@ async function main(): Promise<void> {
       const r = machine.step();
       won += r.won;
       lost += r.lost;
-      pocket += r.pocket;
+      chucker += r.chucker;
+      ballWon += r.ballWon;
+      ballLost += r.ballLost;
       if (r.impacts > 0) {
         impacts += r.impacts;
         if (r.impactMax > impactMax) {
@@ -276,14 +301,24 @@ async function main(): Promise<void> {
       session.lost += lost;
       sound.lost();
     }
-    for (let i = 0; i < pocket; i++) {
-      session.pocket++;
-      slot.addPocket();
-      sound.pocket();
-      scene.flashPocket();
+    for (let i = 0; i < chucker; i++) {
+      session.chucker++;
+      slot.addChucker();
+      sound.chucker();
+      scene.flashChucker();
+    }
+    for (let i = 0; i < ballWon; i++) {
+      slot.addJackpotChance();
+      sound.ballDrop();
+      scene.flashFront();
+      showBanner('BALL IN!!\nJACKPOT CHANCE', 'chance');
+    }
+    if (ballLost > 0) {
+      sound.lost();
+      showBanner('BALL LOST…', 'lost');
     }
     if (impacts > 0) sound.clink(impactMax / 14, impactPan);
-    if (won || lost || pocket) updateSession();
+    if (won || lost || chucker) updateSession();
     winSoundCooldown -= dt;
 
     // ---- スロット・払い出し・演出 ----
@@ -345,9 +380,13 @@ function lightModeFor(slot: SlotMachine, payout: Payout): LightMode {
   return 'idle';
 }
 
+function clamp(v: number, lo: number, hi: number): number {
+  return Math.min(hi, Math.max(lo, v));
+}
+
 function loadJackpot(): number {
   try {
-    const n = Number.parseInt(localStorage.getItem(JACKPOT_STORAGE_KEY) ?? '', 10);
+    const n = Number.parseFloat(localStorage.getItem(JACKPOT_STORAGE_KEY) ?? '');
     if (Number.isFinite(n) && n >= JACKPOT_BASE) return n;
   } catch {
     // 読めなければ初期値

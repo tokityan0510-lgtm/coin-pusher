@@ -71,7 +71,7 @@ export class Lcd {
     g.fillStyle = '#ffd84a';
     g.shadowColor = '#ff9a00';
     g.shadowBlur = 10;
-    g.fillText(String(slot.jackpot), W - 16, 22);
+    g.fillText(String(slot.jackpotDisplay), W - 16, 22);
     g.shadowBlur = 0;
 
     if (slot.mode === 'roulette' || slot.mode === 'rouletteResult' || slot.mode === 'chance') {
@@ -105,6 +105,9 @@ export class Lcd {
     } else if (slot.mode === 'rouletteResult' && slot.lastRoulette) {
       msg = slot.lastRoulette.jackpot ? `JACKPOT!! +${slot.lastRoulette.payout}` : `+${slot.lastRoulette.payout} 枚`;
       color = slot.lastRoulette.jackpot ? '#ffd84a' : '#7dffb0';
+    } else if (slot.mode === 'result' && slot.lastWin && slot.lastWin.symbol === 'STAR') {
+      msg = 'BALL GET!';
+      color = '#ffd84a';
     } else if (slot.mode === 'result' && slot.lastWin && slot.lastWin.payout > 0) {
       msg = `WIN +${slot.lastWin.payout} 枚`;
       color = '#7dffb0';
@@ -131,7 +134,7 @@ export class Lcd {
     const ww = 138;
     const gap = 14;
     const x0 = (W - (ww * 3 + gap * 2)) / 2;
-    const win = slot.mode === 'result' && slot.lastWin && slot.lastWin.payout > 0;
+    const win = slot.mode === 'result' && slot.lastWin !== null;
     slot.reels.forEach((r, i) => {
       const x = x0 + i * (ww + gap);
       g.save();

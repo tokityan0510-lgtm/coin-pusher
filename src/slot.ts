@@ -1,5 +1,5 @@
 import {
-  JACKPOT_ADD_PER_POCKET,
+  JACKPOT_ADD_PER_CHUCKER,
   JACKPOT_BASE,
   JP_ROULETTE,
   JP_WIN_PROB,
@@ -18,6 +18,8 @@ export interface SlotEvents {
   /** 図柄がそろった。payout 枚を払い出す */
   win(symbol: SlotSymbol, payout: number): void;
   miss(): void;
+  /** ★がそろった。JPボールを盤面に出す（出せたら true。上限なら false → すぐジャックポットチャンス） */
+  ballGet(): boolean;
   jackpotChance(): void;
   rouletteTick(): void;
   /** ルーレットの結果。jackpot=true ならジャックポット */
@@ -67,6 +69,9 @@ export class SlotMachine {
   }));
   /** リーチ中か */
   reach = false;
+  /** 待っているジャックポットチャンスの数 */
+  pendingChance = 0;
+  private chanceHold = 0;
   /** 直近の当たり（表示用） */
   lastWin: { symbol: SlotSymbol; payout: number } | null = null;
   /** ルーレットの針の角度（ラジアン）と、止まった区画 */
@@ -84,15 +89,20 @@ export class SlotMachine {
   private lastTickSeg = 0;
 
   constructor(
-    private readonly events: SlotEvents,
+    readonly events: SlotEvents,
     jackpot: number,
   ) {
     this.jackpot = Math.max(JACKPOT_BASE, jackpot);
   }
 
+  /** 表示用のジャックポット枚数（内部は小数で貯める） */
+  get jackpotDisplay(): number {
+    return Math.floor(this.jackpot);
+  }
+
   /** 入賞1回。保留が満タンでもジャックポットは積み増す */
-  addPocket(): boolean {
-    this.jackpot += JACKPOT_ADD_PER_POCKET;
+  addChucker(): boolean {
+    this.jackpot += JACKPOT_ADD_PER_CHUCKER;
     this.events.jackpotChange(this.jackpot);
     this.dirty = true;
     if (this.stock >= SLOT_MAX_STOCK) return false;
@@ -106,9 +116,18 @@ export class SlotMachine {
   update(dt: number): void {
     this.time += dt;
     this.modeTime += dt;
+    this.chanceHold -= dt;
     switch (this.mode) {
       case 'idle':
-        if (this.stock > 0) this.startSpin();
+        // ボールが落ちてたまったジャックポットチャンスを、スロットより先に消化する
+        if (this.pendingChance > 0 && this.chanceHold <= 0) {
+          this.pendingChance--;
+          this.lastWin = null;
+          this.setMode('chance');
+          this.events.jackpotChance();
+        } else if (this.stock > 0) {
+          this.startSpin();
+        }
         break;
       case 'spin':
         this.updateReels(dt);
@@ -244,10 +263,12 @@ export class SlotMachine {
 
   private finishSpin(): void {
     const { symbol, payout } = this.outcome;
+    this.reach = false;
     if (symbol === 'STAR') {
       this.lastWin = { symbol, payout: 0 };
-      this.setMode('chance');
-      this.events.jackpotChance();
+      // ボールを盤面に出す。もう出しきっていたら、その場でジャックポットチャンス
+      if (!this.events.ballGet()) this.pendingChance++;
+      this.setMode('result');
       return;
     }
     if (symbol) {
@@ -296,7 +317,7 @@ export class SlotMachine {
       this.rouletteIndex = idx;
       const v = JP_ROULETTE[idx];
       const jackpot = v === 'JP';
-      const payout = jackpot ? this.jackpot : (v as number);
+      const payout = jackpot ? Math.floor(this.jackpot) : (v as number);
       this.lastRoulette = { jackpot, payout };
       if (jackpot) {
         this.jackpot = JACKPOT_BASE;
@@ -307,9 +328,11 @@ export class SlotMachine {
     }
   }
 
-  /** デバッグ用：即ジャックポットチャンスへ */
-  debugChance(): void {
-    this.forceNext = 'STAR';
-    if (this.stock === 0) this.stock = 1;
+  /** JPボールが手前から落ちた。今の回転が終わったらジャックポットチャンスへ */
+  addJackpotChance(): void {
+    this.pendingChance++;
+    // 「BALL IN!!」を見せる間を置いてからルーレットへ
+    this.chanceHold = 1.5;
+    this.dirty = true;
   }
 }
