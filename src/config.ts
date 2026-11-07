@@ -135,6 +135,8 @@ export const DROP_X_MAX = FLOOR_X - MEDAL_RADIUS - 0.1;
 export const DROP_SCATTER = 0.8;
 /** 連打の最短間隔（秒） */
 export const DROP_COOLDOWN = 0.08;
+/** オート投入の間隔（秒）。実機のシューターの連射くらい */
+export const AUTO_FIRE_INTERVAL = 0.45;
 
 // ---- 盤外判定 ----
 /** メダル中心がこの高さを下回ったら盤外として判定・削除 */
