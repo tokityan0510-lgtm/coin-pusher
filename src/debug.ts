@@ -1,11 +1,15 @@
 import GUI from 'lil-gui';
-import { DEFAULT_PARAMS, PUSHER_STROKE_MAX, PUSHER_STROKE_MIN, type PhysicsParams } from './config';
+import { DEFAULT_PARAMS, PUSHER_STROKE_MAX, PUSHER_STROKE_MIN, type CardType, type PhysicsParams } from './config';
 
 export interface DebugStats {
   fps: number;
   medals: number;
   awake: number;
   stepMs: number;
+  /** このセッションの獲得・没収・入賞の枚数 */
+  won: number;
+  lost: number;
+  chucker: number;
 }
 
 export interface DebugHooks {
@@ -24,8 +28,12 @@ export interface DebugHooks {
   /** スロットの確認用 */
   onSlotStock: () => void;
   onSlotForce: (symbol: '7' | 'STAR') => void;
-  /** JPボールを出す */
+  /** サイコロボールを出す */
   onSpawnBall: () => void;
+  /** すごろく：サイコロを振る / カードをもらう / 最初から */
+  onRoll: () => void;
+  onCard: (card: CardType) => void;
+  onBoardReset: () => void;
   /** 影の有無 */
   onShadows: (on: boolean) => void;
 }
@@ -44,6 +52,9 @@ export function createDebugPanel(hooks: DebugHooks): GUI {
   info.add(stats, 'medals').name('メダル枚数').listen().disable();
   info.add(stats, 'awake').name('動いている枚数').listen().disable();
   info.add(stats, 'stepMs').name('物理ms/step').listen().disable().decimals(2);
+  info.add(stats, 'won').name('獲得').listen().disable();
+  info.add(stats, 'lost').name('没収').listen().disable();
+  info.add(stats, 'chucker').name('入賞').listen().disable();
 
   const medal = gui.addFolder('メダル');
   medal.add(params, 'medalFriction', 0, 1.5, 0.01).name('摩擦').onChange(changed);
@@ -70,17 +81,25 @@ export function createDebugPanel(hooks: DebugHooks): GUI {
     .name('動かす')
     .onChange((v: boolean) => hooks.onPusherToggle(v));
 
-  const slot = gui.addFolder('スロット確認');
+  const slot = gui.addFolder('スロット・すごろく確認');
   const slotActions = {
     stock: () => hooks.onSlotStock(),
     seven: () => hooks.onSlotForce('7'),
     chance: () => hooks.onSlotForce('STAR'),
     ball: () => hooks.onSpawnBall(),
+    roll: () => hooks.onRoll(),
+    warp: () => hooks.onCard('warp'),
+    turbo: () => hooks.onCard('turbo'),
+    reset: () => hooks.onBoardReset(),
   };
   slot.add(slotActions, 'stock').name('保留 +1');
   slot.add(slotActions, 'seven').name('次を 7 揃いにする');
-  slot.add(slotActions, 'chance').name('次を ★（ボール）にする');
-  slot.add(slotActions, 'ball').name('JPボールを出す');
+  slot.add(slotActions, 'chance').name('次を ★（サイコロボール）にする');
+  slot.add(slotActions, 'ball').name('サイコロボールを出す');
+  slot.add(slotActions, 'roll').name('すごろく：サイコロを振る');
+  slot.add(slotActions, 'warp').name('すごろく：ワープカード');
+  slot.add(slotActions, 'turbo').name('すごろく：ターボカード');
+  slot.add(slotActions, 'reset').name('すごろくを最初から');
   slot.close();
 
   const view = gui.addFolder('表示');

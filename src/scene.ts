@@ -26,7 +26,7 @@ import {
   WALL_THICKNESS,
   WALL_X,
 } from './config';
-import type { Lcd } from './lcd';
+import { LCD_PX_H, LCD_PX_W, type Lcd } from './lcd';
 import { boardParts, CURTAIN_TOP, POSE_STRIDE, type Machine } from './physics';
 import {
   ballTexture,
@@ -39,16 +39,16 @@ import {
 } from './textures';
 
 /** 筐体を手前から見下ろすカメラの仰角（度） */
-const CAMERA_ELEVATION_DEG = 56;
+const CAMERA_ELEVATION_DEG = 58;
 /** 注視点（筐体ローカル空間） */
-const LOOK_AT = new THREE.Vector3(0, 1.0, -3.4);
+const LOOK_AT = new THREE.Vector3(0, 1.2, -4.0);
 /** 画面に収めたい横幅（壁の外側） */
 const FIT_WIDTH = (WALL_X + WALL_THICKNESS) * 2;
 
 /** 液晶パネル：仕切り板の上に、奥へ倒して載せる（見下ろす視点から読みやすいように） */
-const LCD_W = 6.6;
-const LCD_H = (LCD_W * 224) / 512;
-const LCD_LEAN_DEG = 38;
+const LCD_W = 8.6;
+const LCD_H = (LCD_W * LCD_PX_H) / LCD_PX_W;
+const LCD_LEAN_DEG = 30;
 
 /** 電飾の点灯パターン */
 export type LightMode = 'idle' | 'spin' | 'win' | 'chance' | 'jackpot';
@@ -188,13 +188,12 @@ export class GameScene {
     this.medalMesh.frustumCulled = false;
     this.cabinet.add(this.medalMesh);
 
-    // JPボール（最大 MAX_BALLS 個。使わないものは隠す）
+    // サイコロボール（最大 MAX_BALLS 個。使わないものは隠す）
     const ballGeo = new THREE.SphereGeometry(BALL_RADIUS, 32, 20);
     const ballMat = new THREE.MeshStandardMaterial({
       map: ballTexture(),
-      metalness: 0.25,
-      roughness: 0.18,
-      emissive: 0x300008,
+      metalness: 0.1,
+      roughness: 0.2,
     });
     for (let i = 0; i < MAX_BALLS; i++) {
       const m = new THREE.Mesh(ballGeo, ballMat);
@@ -330,7 +329,7 @@ export class GameScene {
     this.medalMesh.count = n;
     this.medalMesh.instanceMatrix.needsUpdate = true;
 
-    // JPボール
+    // サイコロボール
     const bp = machine.ballPrev;
     const bc = machine.ballCurr;
     for (let i = 0; i < this.ballMeshes.length; i++) {
@@ -515,7 +514,7 @@ export class GameScene {
     const hw = LCD_W / 2 + 0.22;
     const hh = LCD_H / 2 + 0.22;
     const per = 2 * (hw + hh) * 2;
-    const count = 34;
+    const count = 44;
     for (let i = 0; i < count; i++) {
       let d = (i / count) * per;
       let x: number;

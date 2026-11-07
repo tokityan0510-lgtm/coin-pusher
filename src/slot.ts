@@ -18,7 +18,7 @@ export interface SlotEvents {
   /** 図柄がそろった。payout 枚を払い出す */
   win(symbol: SlotSymbol, payout: number): void;
   miss(): void;
-  /** ★がそろった。JPボールを盤面に出す（出せたら true。上限なら false → すぐジャックポットチャンス） */
+  /** ★がそろった。サイコロボールを盤面に出す（出せたら true。上限なら false → 呼び出し側でその場でサイコロ） */
   ballGet(): boolean;
   jackpotChance(): void;
   rouletteTick(): void;
@@ -113,14 +113,15 @@ export class SlotMachine {
   /** デバッグ用：次の回転を強制的に指定の図柄でそろえる */
   forceNext: SlotSymbol | null = null;
 
-  update(dt: number): void {
+  /** boardBusy: すごろくが動いている間はジャックポットチャンスを始めない（液晶の中央を取り合わないように） */
+  update(dt: number, boardBusy = false): void {
     this.time += dt;
     this.modeTime += dt;
     this.chanceHold -= dt;
     switch (this.mode) {
       case 'idle':
         // ボールが落ちてたまったジャックポットチャンスを、スロットより先に消化する
-        if (this.pendingChance > 0 && this.chanceHold <= 0) {
+        if (this.pendingChance > 0 && this.chanceHold <= 0 && !boardBusy) {
           this.pendingChance--;
           this.lastWin = null;
           this.setMode('chance');
@@ -266,8 +267,8 @@ export class SlotMachine {
     this.reach = false;
     if (symbol === 'STAR') {
       this.lastWin = { symbol, payout: 0 };
-      // ボールを盤面に出す。もう出しきっていたら、その場でジャックポットチャンス
-      if (!this.events.ballGet()) this.pendingChance++;
+      // サイコロボールを盤面に出す（出しきっていたときの扱いは呼び出し側）
+      this.events.ballGet();
       this.setMode('result');
       return;
     }
@@ -328,10 +329,10 @@ export class SlotMachine {
     }
   }
 
-  /** JPボールが手前から落ちた。今の回転が終わったらジャックポットチャンスへ */
+  /** すごろくで目的地に着いた。今の回転が終わったらジャックポットチャンスへ */
   addJackpotChance(): void {
     this.pendingChance++;
-    // 「BALL IN!!」を見せる間を置いてからルーレットへ
+    // 到着の表示を見せる間を置いてからルーレットへ
     this.chanceHold = 1.5;
     this.dirty = true;
   }

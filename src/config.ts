@@ -158,12 +158,12 @@ export const REEL_STRIP: SlotSymbol[] = [
 ];
 /**
  * 1回転ごとの抽選表（上から順に判定。確率の合計が 1 未満の残りはハズレ）。
- * payout は払い出し枚数。STAR がそろうとジャックポットチャンス（ルーレット）へ。
+ * payout は払い出し枚数。STAR がそろうとサイコロボールが盤面に出る（すごろくを進める）。
  */
 export const SLOT_TABLE: { symbol: SlotSymbol; prob: number; payout: number }[] = [
   { symbol: '7', prob: 1 / 150, payout: 20 },
   { symbol: 'BAR', prob: 1 / 80, payout: 8 },
-  { symbol: 'STAR', prob: 1 / 80, payout: 0 },
+  { symbol: 'STAR', prob: 1 / 10, payout: 0 },
   { symbol: 'BELL', prob: 1 / 25, payout: 3 },
   { symbol: 'CHERRY', prob: 1 / 15, payout: 2 },
 ];
@@ -192,8 +192,8 @@ export const PAYOUT_MAX_ACTIVE = 400;
 // ---- 音 ----
 export const MUTE_STORAGE_KEY = 'coinPusher.mute.v1';
 
-// ---- JPボール ----
-// スロットで ★ がそろうとボールが盤面に出てくる。手前から落とせたらジャックポットチャンス、溝に落ちたら何もなし。
+// ---- サイコロボール ----
+// スロットで ★ がそろうとボールが盤面に出てくる。手前から落とせたらサイコロを振ってすごろくが進む。溝に落ちたら何もなし。
 /** ボールの半径（メダルより大きく、メダルの山に乗って押される） */
 export const BALL_RADIUS = 0.7;
 /** ボールの質量（メダル1枚 = medalMass）。重いほどメダルを押しのけて進む */
@@ -205,5 +205,61 @@ export const BALL_FRICTION = 0.4;
  */
 export const BALL_ANGULAR_DAMPING = 4;
 export const BALL_LINEAR_DAMPING = 0.6;
-/** 盤面に同時に出せるボールの数。超えるときはその場でジャックポットチャンスにする */
+/** 盤面に同時に出せるボールの数。超えるときはその場でサイコロを振る */
 export const MAX_BALLS = 3;
+
+// ---- すごろく（宇宙旅行） ----
+// サイコロボールを落とすとサイコロを振り、ロケットが液晶のすごろくを進む。
+// 止まったマスで メダル獲得 / 基地獲得 / カード獲得。目的地に着くと、持っている基地の配当＋ジャックポットチャンス。
+export type SquareType = 'medal' | 'base' | 'card';
+export interface Square {
+  type: SquareType;
+  /** 表示名（星・基地の名前） */
+  name: string;
+  /** medal: 獲得枚数 / base: 目的地に着くたびの配当 */
+  value: number;
+}
+/** すごろくのマス（一周 24 マス。液晶の外周に並べる） */
+export const BOARD: Square[] = [
+  { type: 'medal', name: '発射場', value: 5 },
+  { type: 'base', name: '月面ドーム', value: 4 },
+  { type: 'medal', name: 'シリウス', value: 8 },
+  { type: 'card', name: '流れ星', value: 0 },
+  { type: 'base', name: '火星コロニー', value: 6 },
+  { type: 'medal', name: 'ベガ', value: 5 },
+  { type: 'medal', name: 'アルタイル', value: 12 },
+  { type: 'base', name: '小惑星鉱山', value: 8 },
+  { type: 'card', name: '流れ星', value: 0 },
+  { type: 'medal', name: 'デネブ', value: 5 },
+  { type: 'base', name: '氷の衛星ラボ', value: 5 },
+  { type: 'medal', name: 'リゲル', value: 15 },
+  { type: 'medal', name: 'スピカ', value: 5 },
+  { type: 'base', name: '木星ガス工場', value: 10 },
+  { type: 'card', name: '流れ星', value: 0 },
+  { type: 'medal', name: 'カペラ', value: 8 },
+  { type: 'base', name: '土星リング港', value: 12 },
+  { type: 'medal', name: 'アンタレス', value: 5 },
+  { type: 'medal', name: 'ポラリス', value: 20 },
+  { type: 'base', name: '彗星ステーション', value: 7 },
+  { type: 'card', name: '流れ星', value: 0 },
+  { type: 'medal', name: 'プロキオン', value: 5 },
+  { type: 'base', name: '星雲ホテル', value: 15 },
+  { type: 'medal', name: 'すばる', value: 10 },
+];
+/** 次の目的地は、今の位置からこのマス数以上先から選ぶ */
+export const DEST_MIN_DISTANCE = 7;
+export const DEST_MAX_DISTANCE = 16;
+/** 目的地に着いたときのボーナス（基地の配当とは別） */
+export const GOAL_BONUS = 10;
+
+/** カード（最大 MAX_CARDS 枚まで持てる。HUD のボタンで使う） */
+export type CardType = 'turbo' | 'shower' | 'ball' | 'warp';
+export const CARD_INFO: Record<CardType, { name: string; desc: string; weight: number }> = {
+  turbo: { name: 'ターボ', desc: '次のサイコロを2個振る', weight: 4 },
+  shower: { name: '流星群', desc: 'メダル20枚が降ってくる', weight: 4 },
+  ball: { name: '召喚', desc: 'サイコロボールを出す', weight: 3 },
+  warp: { name: 'ワープ', desc: '目的地まで一気に移動', weight: 1 },
+};
+export const MAX_CARDS = 3;
+export const SHOWER_CARD_MEDALS = 20;
+export const SUGOROKU_STORAGE_KEY = 'coinPusher.sugoroku.v1';

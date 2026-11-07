@@ -197,33 +197,34 @@ export function glowTexture(): THREE.Texture {
   return new THREE.CanvasTexture(c);
 }
 
-/** JPボール：赤と金の帯に「JP」の文字（球に巻きつける正距円筒図法のテクスチャ） */
+/**
+ * サイコロボール：白い球に赤と黒の目（球に巻きつける正距円筒図法のテクスチャ）。
+ * 赤道に4面、両極に2面を置いて、どこから見てもサイコロとわかるようにする。
+ */
 export function ballTexture(): THREE.Texture {
   const [c, g] = canvas(512, 256);
-  g.fillStyle = '#d4102f';
+  g.fillStyle = '#f7f5ee';
   g.fillRect(0, 0, 512, 256);
-  // 赤道の金帯
-  const band = g.createLinearGradient(0, 100, 0, 156);
-  band.addColorStop(0, '#a87410');
-  band.addColorStop(0.5, '#ffe28a');
-  band.addColorStop(1, '#a87410');
-  g.fillStyle = band;
-  g.fillRect(0, 104, 512, 48);
-  // 帯の上に JP と星（裏表に2つずつ）
-  g.font = 'italic 900 40px system-ui, sans-serif';
-  g.textAlign = 'center';
-  g.textBaseline = 'middle';
-  for (let i = 0; i < 4; i++) {
-    const x = 64 + i * 128;
-    if (i % 2 === 0) {
-      g.fillStyle = '#7a0010';
-      g.fillText('JP', x, 129);
-    } else {
-      starPath(g, x, 128, 20);
-      g.fillStyle = '#7a0010';
-      g.fill();
-    }
-  }
+  const pip = (x: number, y: number, r: number, color: string, sx = 1) => {
+    g.beginPath();
+    g.ellipse(x, y, r * sx, r, 0, 0, Math.PI * 2);
+    g.fillStyle = color;
+    g.fill();
+  };
+  const p = 22;
+  // 赤道の4面（1, 2, 6, 5）
+  const faces: [number, [number, number][]][] = [
+    [64, [[0, 0]]],
+    [192, [[-p, -p], [p, p]]],
+    [320, [[-p, -p], [p, -p], [-p, 0], [p, 0], [-p, p], [p, p]]],
+    [448, [[-p, -p], [p, -p], [0, 0], [-p, p], [p, p]]],
+  ];
+  faces.forEach(([x, pts], k) => {
+    for (const [dx, dy] of pts) pip(x + dx, 128 + dy, k === 0 ? 20 : 11, k === 0 ? '#d4102f' : '#1a1a2a');
+  });
+  // 極の2面（3, 4）。極付近は横に引き伸ばされるので横長の楕円で描く
+  for (const [dx] of [[-1], [0], [1]]) pip(256 + dx * 120, 24, 9, '#1a1a2a', 3);
+  for (const [dx] of [[-1.5], [-0.5], [0.5], [1.5]]) pip(256 + dx * 100, 232, 9, '#1a1a2a', 3);
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
   t.anisotropy = 4;
